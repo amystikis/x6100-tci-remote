@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=X6100 TCI Remote
+Comment=Remote controller for the Xiegu X6100 (OpenX6X00) over TCI
+Exec=x6100-tci-remote
+Icon=x6100-tci-remote
+Terminal=false
+Categories=HamRadio;Network;AudioVideo;

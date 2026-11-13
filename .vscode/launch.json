@@ -1,0 +1,39 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "App - demo (fake radio, no hardware)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "x6100_remote",
+      "args": ["--demo"],
+      "env": { "PYTHONPATH": "${workspaceFolder}/src" }
+    },
+    {
+      "name": "App - real radio (asks for address)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "x6100_remote",
+      "args": ["${input:radioAddress}"],
+      "env": { "PYTHONPATH": "${workspaceFolder}/src" }
+    },
+    {
+      "name": "Fake TCI radio (port 50001)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "x6100_remote.fakeradio",
+      "args": ["--port", "50001"],
+      "env": { "PYTHONPATH": "${workspaceFolder}/src" }
+    },
+    {
+      "name": "Probe radio (passive, sends nothing)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/probe_tci.py",
+      "args": ["${input:radioAddress}"]
+    }
+  ],
+  "inputs": [
+    { "id": "radioAddress", "type": "promptString", "description": "Radio address", "default": "192.168.0.150" }
+  ]
+}

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "x6100-tci-remote"
+version = "0.1.0"
+description = "Independent desktop remote controller for the Xiegu X6100 (OpenX6X00) over TCI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["websockets>=13", "numpy>=1.24"]
+
+[project.optional-dependencies]
+gui = ["PySide6>=6.6"]
+dev = ["pytest>=8", "ruff>=0.5"]
+
+[project.scripts]
+x6100-tci-remote = "x6100_remote.app:main"
+x6100-fake-radio = "x6100_remote.fakeradio:main"
+
+[project.gui-scripts]
+x6100-tci-remote-gui = "x6100_remote.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]
+ignore = ["B008"]

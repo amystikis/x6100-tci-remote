@@ -1,0 +1,11 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    { "label": "Set up venv (dev + GUI)", "type": "shell",
+      "command": "python3 -m venv .venv && .venv/bin/pip install -U pip && .venv/bin/pip install -e '.[gui,dev]'" },
+    { "label": "Run tests", "type": "shell", "group": "test",
+      "command": "QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q" },
+    { "label": "Lint (ruff)", "type": "shell", "command": ".venv/bin/ruff check ." },
+    { "label": "Build .deb", "type": "shell", "command": "packaging/build_deb.sh" }
+  ]
+}
