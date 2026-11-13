@@ -21,6 +21,8 @@ python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[gui]"          # or: pipx install ".[gui]"
 ```
 
+On Debian/Ubuntu, Qt may need `sudo apt install libxcb-cursor0` (error "could not load the Qt platform plugin xcb").
+
 Optional `.deb` (needs PySide6 packages available from your distro): `packaging/build_deb.sh`.
 
 ## Run

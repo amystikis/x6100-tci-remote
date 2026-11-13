@@ -276,15 +276,21 @@ class SpectrumView(QWidget):
         p.setFont(font)
         fm = QFontMetricsF(font)
         lane_end = [-1e9] * SPOT_LANES
+        meter = self._cw_meter_rect(w)
         for spot in sorted((s for s in self._spots if lo <= s.freq <= hi), key=lambda s: (s.age, s.freq)):
             x = self._x_of(spot.freq)
             tw = fm.horizontalAdvance(spot.call) + 6
             left = min(max(x - tw / 2, 1.0), w - tw - 1)
-            lane = next((i for i in range(SPOT_LANES) if left > lane_end[i] + 2), None)
+
+            def lane_box(i: int, left: float = left, tw: float = tw) -> QRectF:
+                return QRectF(left, 2 + i * SPOT_LANE_H, tw, SPOT_LANE_H - 1)
+
+            lane = next((i for i in range(SPOT_LANES)
+                         if left > lane_end[i] + 2 and not (meter and lane_box(i).intersects(meter))), None)
             if lane is None:
-                continue                                       # no room, skip rather than overlap
+                continue                                       # no room (or under the CW meter): skip, never overlap
             lane_end[lane] = left + tw
-            box = QRectF(left, 2 + lane * SPOT_LANE_H, tw, SPOT_LANE_H - 1)
+            box = lane_box(lane)
             color = QColor(SPOT_COLORS.get(spot.mode.upper(), "#a0a8b8"))
             color.setAlpha(255 if spot.age <= 20 else 140)
             stem = QColor(color)
@@ -297,18 +303,28 @@ class SpectrumView(QWidget):
             p.drawText(box, Qt.AlignmentFlag.AlignCenter, spot.call)
             self._spot_boxes.append((box, spot))
 
+    CW_BAR_H = 28
+
+    def _cw_meter_rect(self, w: int) -> QRectF | None:
+        """The CW tuner meter: top of the scope, its right edge on the VFO line (top-left corner of the line)."""
+        if self._cw_bw is None or not self.show_cw_tuner or self._level is None:
+            return None
+        strip_w = max(110.0, min(230.0, w * 0.3))                  # a fixed-size meter, not tied to the span
+        x1 = w / 2 - 3
+        return QRectF(x1 - strip_w, 3, strip_w, self.CW_BAR_H + 6)
+
     def _paint_cw_tuner(self, p: QPainter, f: SpectrumFrame, w: int, ph: int) -> None:
         """Vertical bars centred on the VFO line: the spectrum over the passband (and a bit more), the bar of the
         strongest signal coloured by how well it is aligned, and its offset in Hz."""
-        if self._cw_bw is None or not self.show_cw_tuner or self._level is None:
+        rect = self._cw_meter_rect(w)
+        if rect is None:
             return
         bw = float(self._cw_bw)
         half = min(window_half_width(bw), f.span_hz / 2.0)
-        n, bar_h = 21, 34
-        top = max(AXIS_H, ph - bar_h - 6)
-        strip_w = max(110.0, min(230.0, w * 0.3))                  # a fixed-size meter, not tied to the span
-        x0, x1 = w / 2 - strip_w / 2, w / 2 + strip_w / 2
-        p.fillRect(QRectF(x0, top - 3, x1 - x0, bar_h + 6), QColor(5, 10, 20, 190))
+        n, bar_h = 21, self.CW_BAR_H
+        top = rect.top() + 3
+        x0, x1 = rect.left(), rect.right()
+        p.fillRect(rect, QColor(5, 10, 20, 190))
         levels = np.clip(window_levels(f, half, n, values=self._level), 0.0, 1.0)
         bar_w = (x1 - x0) / n
         tune = self._cw_tune
@@ -332,7 +348,7 @@ class SpectrumView(QWidget):
         else:
             text = "%+d Hz%s" % (round(tune.offset_hz), "  on tone" if tune.aligned else "")
             colour = QColor("#3ddc97") if tune.aligned else QColor("#ff8a4c" if tune.in_passband else "#ff5a5a")
-        lx = x1 + 6 if x1 + 112 < w else x0 - 112                   # label beside the meter
+        lx = x0 - 112 if x0 - 112 > 0 else x1 + 8                   # label to the left of the meter
         ly = top + bar_h / 2 - 8
         p.fillRect(QRectF(lx, ly, 106, 16), QColor(5, 10, 20, 215))
         p.setPen(colour)

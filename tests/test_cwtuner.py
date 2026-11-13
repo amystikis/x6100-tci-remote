@@ -91,3 +91,26 @@ def test_widget_draws_tuner_only_when_enabled():
     v.set_cw_tuner(None)
     assert v._cw_tune is None
     v.grab()
+
+
+def test_meter_sits_top_left_of_the_vfo_line_and_spots_keep_clear():
+    from PySide6.QtWidgets import QApplication
+
+    from x6100_remote.gui.spectrum_view import SpectrumView
+    from x6100_remote.panelinfo import Spot
+    QApplication.instance() or QApplication([])
+    v = SpectrumView(rows=8)
+    v.resize(800, 500)
+    v.push(frame_with({60.0: 60}))
+    v.set_cw_tuner(500)
+    r = v._cw_meter_rect(800)
+    assert r.right() <= 400 and r.top() < 10 and r.left() > 0               # left of the line, at the top
+    spots = [Spot(CENTRE + off, "S%d" % i, "CW") for i, off in enumerate((-9000, -7000, -4000, -2000, 3000, 9000))]
+    v.set_spots(spots)
+    v.grab()
+    drawn = {s.call for _, s in v._spot_boxes}
+    assert drawn                                                             # spots are still shown
+    assert not any(box.intersects(r) for box, _ in v._spot_boxes)           # none under the meter
+    v.set_cw_tuner(None)
+    v.grab()
+    assert len(v._spot_boxes) >= len(drawn)                                  # all back when the meter is off
