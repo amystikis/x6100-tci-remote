@@ -80,3 +80,12 @@ def save_panel_token(url: str, token: str) -> None:
         tokens = {}
     tokens[_host_of(url)] = token
     qsettings().setValue("panel_tokens", json.dumps(tokens))
+
+
+def load_flag(name: str, default: bool = True) -> bool:
+    v = qsettings().value("flag_" + name)
+    return default if v is None else str(v).lower() != "false"
+
+
+def save_flag(name: str, on: bool) -> None:
+    qsettings().setValue("flag_" + name, "true" if on else "false")

@@ -142,6 +142,18 @@ class TciWorker(QObject):
         finally:
             self._pressing -= 1
 
+    def request_pair_code(self) -> None:
+        async def go():
+            c = self._panel_client
+            if c is None:
+                self._notice("The panel connection is not up yet.")
+                return
+            try:
+                await c.request_pair_code()
+            except Exception as e:
+                self._notice("Could not ask the radio for a pairing code: %s" % e)
+        self.submit(go())
+
     def pair_panel(self, code: str, name: str) -> None:
         async def go():
             c = self._panel_client

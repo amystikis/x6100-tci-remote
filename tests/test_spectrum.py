@@ -229,11 +229,12 @@ def test_spot_layout_hit_testing_and_band_plan():
 
 # ---- keys, pairing, role gating ----------------------------------------------------------------------
 def test_whitelist_never_allows_power_or_ptt():
-    for ok in ("screen 0", "panel 1", "ping 1", "control take", "control release", "key PRE 1", "key ATU 0",
+    for ok in ("screen 0", "panel 1", "ping 1", "control take", "control release", "pair?", "key PRE 1", "key ATU 0",
                "pair 123456 my-app", "auth " + "ab" * 16):
         assert is_allowed(ok), ok
     for bad in ("key POWER 1", "key PTT 1", "key KEY 1", "key MFK 1", "key PRE 2", "key PRE", "screen 1",
-                "pair 12345 x", "pair 123456", "auth zz", "control grab", "key PRE 1; key POWER 1", "key  PRE 1"):
+                "pair 12345 x", "pair 123456", "pair ?", "auth zz", "control grab", "key PRE 1; key POWER 1",
+                "key  PRE 1"):
         assert not is_allowed(bad), bad
     assert set(KEY_NAMES) == {"PRE", "AB", "VM", "FST", "ATU"}
 
@@ -282,6 +283,10 @@ def test_pairing_then_key_press_changes_radio_state():
         paired = []
         c.on_paired = lambda role, key: paired.append((role, key))
         try:
+            await c.pair("123456", "x")                                   # no code requested yet: nothing happens
+            await asyncio.sleep(0.15)
+            assert paired == [] and c.info.role == "view"
+            await c.request_pair_code()                                   # "pair?": the radio shows the code
             await c.pair("000000", "x")                                   # wrong code: nothing happens
             await asyncio.sleep(0.15)
             assert paired == [] and c.info.role == "view"

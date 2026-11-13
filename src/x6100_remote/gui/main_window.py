@@ -11,10 +11,11 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDockWidget, QFrame, QGridL
                                QPushButton, QSlider, QSpinBox, QVBoxLayout, QWidget)
 
 from .. import __version__
+from ..ipc import CommandServer
 from .audio import AVAILABLE as AUDIO_OK, MicSource, RxAudio
-from .settings import (load_band_memory, load_panel_token, load_radios, load_show_spectrum,
+from .settings import (load_band_memory, load_flag, load_panel_token, load_radios, load_show_spectrum,
                        panel_url_for, parse_target, remember_radio, save_band_memory,
-                       save_panel_token, save_show_spectrum)
+                       save_flag, save_panel_token, save_show_spectrum)
 from .spectrum_view import SpectrumView
 from .widgets import FrequencyDisplay, SMeter
 from .worker import TciWorker
@@ -81,6 +82,8 @@ class MainWindow(QMainWindow):
         self._tx_since = 0.0
         self._mode_buttons: dict[str, QPushButton] = {}
         self._ptt_on = False
+        self._ptt_external = False         # keyed by an OS hotkey (--ptt): does not unkey when the window loses focus
+        self.cmd_server: CommandServer | None = None
         self._panel_url: str | None = None
 
         root = QWidget()
@@ -146,7 +149,7 @@ class MainWindow(QMainWindow):
         v.addWidget(self.smeter)
 
         # bands / modes -----------------------------------------------------------
-        bands = QGroupBox("Band")
+        bands = self.band_box = QGroupBox("Band")
         bl = QHBoxLayout(bands)
         self._band_buttons: dict[str, QPushButton] = {}
         for name, *_ in BANDS:
@@ -160,7 +163,7 @@ class MainWindow(QMainWindow):
         v.addWidget(self.modes_box)
 
         # filter / agc / rit -------------------------------------------------------
-        rx = QGroupBox("Receiver")
+        rx = self.rx_box = QGroupBox("Receiver")
         g = QGridLayout(rx)
         self.filter_l = QHBoxLayout()
         g.addWidget(QLabel("Filter"), 0, 0)
@@ -215,7 +218,7 @@ class MainWindow(QMainWindow):
         v.addWidget(rx)
 
         # audio -------------------------------------------------------------------
-        au = QGroupBox("Audio")
+        au = self.audio_box = QGroupBox("Audio")
         al = QHBoxLayout(au)
         self.sound = _btn("Sound", True, self.toggle_sound)
         self.sound.setEnabled(AUDIO_OK)
@@ -286,6 +289,17 @@ class MainWindow(QMainWindow):
         act = self.dock.toggleViewAction()
         act.setText("Protocol log")
         m.addAction(act)
+        m.addSeparator()
+        for key, label, box in (("band", "Band", self.band_box), ("mode", "Mode", self.modes_box),
+                                ("receiver", "Receiver", self.rx_box), ("audio", "Audio", self.audio_box)):
+            act = QAction(label, self)
+            act.setCheckable(True)
+            act.setChecked(load_flag("show_" + key))
+            act.toggled.connect(lambda on, k=key, b=box: self._show_group(k, b, on))
+            box.setVisible(act.isChecked())
+            m.addAction(act)
+            setattr(self, "view_" + key + "_act", act)
+        m.addSeparator()
         self.spots_act = QAction("DX spots on spectrum", self)
         self.spots_act.setCheckable(True)
         self.spots_act.setChecked(True)
@@ -431,6 +445,10 @@ class MainWindow(QMainWindow):
         base = self._freq_target if self._freq_target is not None else self.state.freq
         self.tune_by(hz - base)
 
+    def _show_group(self, key: str, box: QGroupBox, on: bool) -> None:
+        save_flag("show_" + key, on)
+        box.setVisible(on)
+
     def toggle_spectrum(self, on: bool) -> None:
         save_show_spectrum(on)
         self.spectrum.setVisible(on)
@@ -483,12 +501,13 @@ class MainWindow(QMainWindow):
             self.set_ptt(False)
         self._update_key_buttons()
 
-    def set_ptt(self, on: bool) -> None:
+    def set_ptt(self, on: bool, external: bool = False) -> None:
         if on and (not self.tx_enable.isChecked() or not self.w.client):
             return
         if on == self._ptt_on:
             return
         self._ptt_on = on
+        self._ptt_external = on and external
         use_pc_mic = self.pc_mic.isChecked() and on
         if on and use_pc_mic:
             if not self.mic.start():
@@ -530,12 +549,15 @@ class MainWindow(QMainWindow):
             super().keyReleaseEvent(e)
 
     def changeEvent(self, e) -> None:
-        if e.type() == QEvent.Type.ActivationChange and not self.isActiveWindow() and self._ptt_on:
-            self.set_ptt(False)                    # never stay keyed after losing focus
+        if (e.type() == QEvent.Type.ActivationChange and not self.isActiveWindow() and self._ptt_on
+                and not self._ptt_external):
+            self.set_ptt(False)                    # never stay keyed after losing focus (button/Space PTT)
         super().changeEvent(e)
 
     def closeEvent(self, e) -> None:
         self.set_ptt(False)
+        if self.cmd_server is not None:
+            self.cmd_server.stop()
         save_band_memory(self.band_mem)
         self.rx.stop()
         self.mic.stop()
@@ -582,6 +604,29 @@ class MainWindow(QMainWindow):
             self.cw_view.verticalScrollBar().setValue(self.cw_view.verticalScrollBar().maximum())
             self._update_cw_visibility()
 
+    # OS hotkey support (x6100-tci-remote --ptt on|off|toggle) -----------------------------------------------
+    def start_command_server(self, name: str | None = None) -> bool:
+        self.cmd_server = CommandServer(self.remote_command, name)
+        return self.cmd_server.start()
+
+    def remote_command(self, cmd: str) -> str:
+        """Same guards as the PTT button; the auto-unkey timer still applies."""
+        action = cmd.split()[-1]
+        if action == "off":
+            self.set_ptt(False)
+            return "ok: receive"
+        if not self.tx_enable.isChecked():
+            return "refused: 'Enable transmit controls' is not ticked in the app"
+        if not self.w.client or not self.state.ready:
+            return "refused: not connected to the radio"
+        want = (not self._ptt_on) if action == "toggle" else True
+        if want != self._ptt_on:
+            self.set_ptt(want, external=True)
+            self.statusBar().showMessage("PTT %s by hotkey" % ("ON" if want else "off"), 4000)
+        if want and not self._ptt_on:
+            return "error: could not start transmit"
+        return "ok: transmitting" if self._ptt_on else "ok: receive"
+
     # radio keys ----------------------------------------------------------------------------------------
     def _set_on(self, btn: QPushButton, on: bool) -> None:
         if btn.property("on") != on:
@@ -611,8 +656,11 @@ class MainWindow(QMainWindow):
         self.w.press_key("ATU", 1.2)                 # a long press starts a tune cycle, as on the radio's page
 
     def pair_panel(self) -> None:
+        self.w.request_pair_code()                    # "pair?": the radio now shows a code on its own screen
         code, ok = QInputDialog.getText(self, "Pair with the radio",
-                                        "Pairing code (6 digits) from the radio:")
+                                        "A 6-digit code is now on the radio's screen (for two minutes).\n"
+                                        "If it is gone: Settings > General > BROWSER REMOTE > Pair code.\n\n"
+                                        "Code:")
         code = code.strip()
         if not ok:
             return

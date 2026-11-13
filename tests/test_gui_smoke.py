@@ -160,7 +160,14 @@ def test_key_buttons_need_pairing_and_atu_tune_needs_tx_enable(env):
     win._key_buttons["PRE"].click()                                        # unpaired: refused, nothing sent
     pump(lambda: "not paired" in win.statusBar().currentMessage())
     assert not any(m.startswith(("key", "control")) for m in panel.log)
-    win.w.pair_panel("123456", "gui-test")                                 # what the Pair... dialog calls
+    win.w.pair_panel("123456", "gui-test")                                 # no code was requested yet: refused
+    asyncio.run_coroutine_threadsafe(asyncio.sleep(0.2), win.w.loop).result(2)
+    assert win.w.info.role == "view" and win.w.info.state.get("pre") is not None
+    from PySide6.QtWidgets import QInputDialog
+    QInputDialog.getText = staticmethod(lambda *a, **k: ("123456", True))
+    win.pair_panel()                                                       # real flow: pair? then the typed code
+    pump(lambda: any(m.startswith("pair 123456") for m in panel.log))
+    assert panel.log.index("pair?") < [i for i, m in enumerate(panel.log) if m.startswith("pair 123456")][-1]
     pump(lambda: win.w.info.role == "operate" and win.pair_btn.isHidden())
     pump(lambda: "Paired as operate" in win.statusBar().currentMessage())
     pre_before = panel.pre
@@ -177,3 +184,73 @@ def test_key_buttons_need_pairing_and_atu_tune_needs_tx_enable(env):
     pump(lambda: not win.atu_tune.isEnabled())
     win.w.disconnect_panel()
     asyncio.run_coroutine_threadsafe(asyncio.sleep(0.05), win.w.loop).result(2)
+
+
+def test_view_menu_toggles_groups_and_remembers(env):
+    win, radio, pump = env
+    for key, box in (("band", win.band_box), ("mode", win.modes_box), ("receiver", win.rx_box),
+                     ("audio", win.audio_box)):
+        act = getattr(win, "view_%s_act" % key)
+        assert act.isChecked() and not box.isHidden()
+        act.setChecked(False)
+        assert box.isHidden()
+        act.setChecked(True)
+        assert not box.isHidden()
+    win.view_audio_act.setChecked(False)
+    from x6100_remote.gui.settings import load_flag
+    assert load_flag("show_audio") is False and load_flag("show_band") is True
+    win.view_audio_act.setChecked(True)
+
+
+def _cli(pump, name, *args, code=None):
+    """Run `python -m x6100_remote ...` like an OS keyboard shortcut would; pump Qt events until it finishes."""
+    import subprocess
+    import sys
+    env = dict(os.environ, X6100_TCI_REMOTE_IPC=name, QT_QPA_PLATFORM="offscreen",
+               PYTHONPATH=os.path.join(os.path.dirname(__file__), "..", "src"))
+    cmd = [sys.executable, "-m", "x6100_remote", *args] if code is None else [sys.executable, "-c", code]
+    p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    pump(lambda: p.poll() is not None, 15)
+    out, err = p.communicate()
+    return p.returncode, (out + err).strip()
+
+
+def test_os_hotkey_ptt_via_command_line(env):
+    import uuid
+
+    from PySide6.QtCore import QEvent
+    win, radio, pump = env
+    name = "x6100-test-" + uuid.uuid4().hex[:8]
+    assert win.start_command_server(name) is True
+    assert _cli(pump, name, "--ptt", "on") == (1, "refused: 'Enable transmit controls' is not ticked in the app")
+    assert not radio.trx
+    win.tx_enable.setChecked(True)
+    win.isActiveWindow = lambda: False                                     # the window has lost focus
+    assert _cli(pump, name, "--ptt", "on") == (0, "ok: transmitting")
+    pump(lambda: radio.trx)
+    win.changeEvent(QEvent(QEvent.Type.ActivationChange))                  # hotkey PTT stays on
+    assert win._ptt_on and radio.trx
+    assert _cli(pump, name, "--ptt", "toggle") == (0, "ok: receive")
+    pump(lambda: not radio.trx)
+    assert _cli(pump, name, "--ptt", "toggle") == (0, "ok: transmitting")
+    pump(lambda: radio.trx)
+    assert _cli(pump, name, "--ptt", "off") == (0, "ok: receive")         # off always works
+    pump(lambda: not radio.trx)
+    win.set_ptt(True)                                                      # button PTT still drops on focus loss
+    pump(lambda: radio.trx)
+    win.changeEvent(QEvent(QEvent.Type.ActivationChange))
+    pump(lambda: not radio.trx)
+    win.cmd_server.stop()
+    rc, msg = _cli(pump, name, "--ptt", "on")
+    assert rc == 1 and "not running" in msg                                # no app: clear error, non-zero exit
+
+
+def test_second_instance_does_not_steal_the_hotkey_socket(env):
+    import uuid
+    win, radio, pump = env
+    name = "x6100-test-" + uuid.uuid4().hex[:8]
+    assert win.start_command_server(name) is True
+    code = ("from PySide6.QtCore import QCoreApplication; import sys; app = QCoreApplication(sys.argv[:1]); "
+            "from x6100_remote.ipc import CommandServer; print(CommandServer(lambda c: 'x', %r).start())" % name)
+    assert _cli(pump, name, code=code) == (0, "False")
+    win.cmd_server.stop()

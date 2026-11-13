@@ -51,10 +51,29 @@ automatic (the radio's bin values are not calibrated). Hide it with View > Spect
 
 PRE, A/B, V/M, FST and ATU act like pressing those keys on the radio (sent over the panel socket; TCI cannot do
 them). PRE and ATU light up from the radio's reported state. **They need this app to be paired with the radio**:
-click **Pair...** and enter the radio's 6-digit pairing code; the key the radio returns is saved for that radio.
+click **Pair...**: the app asks the radio for a code (it appears on the radio's screen for two minutes; later via Settings > General > BROWSER REMOTE > Pair code), you type it in, and the key the radio returns is saved for that radio.
 Until paired, the buttons only tell you so and send nothing. The app can only ever press those five keys (never
 POWER or PTT). **Tune ATU** makes the radio transmit a carrier while it tunes, so it also needs "Enable transmit
 controls". With `--demo`, the fake radio's pairing code is `123456`.
+
+## PTT from an OS keyboard shortcut
+
+While the app is running, this command keys or unkeys the radio, so any desktop keyboard shortcut can do it:
+
+```bash
+x6100-tci-remote --ptt toggle     # or: on | off
+```
+
+In GNOME (Settings > Keyboard > Custom Shortcuts) or KDE (Shortcuts > Custom Shortcuts) use the full path of the
+command, e.g. `/home/you/x6100-tci-remote/.venv/bin/x6100-tci-remote --ptt toggle`. Desktop shortcuts fire on key *press*
+only, so this is a toggle, not hold-to-talk (on X11, `xbindkeys` can run `--ptt on` on press and `--ptt off` on release).
+It has the same guards as the PTT button: "Enable transmit controls" must be ticked and the radio connected, and the
+auto-unkey timer still applies; a hotkey-keyed PTT does not drop when the window loses focus. `--ptt off` always works.
+The command talks to the running app over a per-user local socket, never over the network.
+
+## View menu
+
+Band, Mode, Receiver and Audio can each be hidden or shown from View; the choice is remembered.
 
 ## Safety
 

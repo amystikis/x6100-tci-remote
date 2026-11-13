@@ -185,6 +185,7 @@ class FakePanel:
     def __init__(self, radio: FakeRadio) -> None:
         self.radio = radio
         self.log: list[str] = []          # every text command received (for tests)
+        self.code_shown = False            # set by "pair?", like the code appearing on the real radio's screen
         self.keys_pressed: list[str] = []  # keys honoured while paired and holding control
         self.seq = 0
         self.pre, self.atu, self.vfo_b = 1, 1, 0
@@ -235,7 +236,9 @@ class FakePanel:
         if msg.startswith("auth ") and parts[1] == self.TOKEN:
             sess["role"] = "operate"
             await ws.send("role operate 1 tester")
-        elif msg.startswith("pair ") and len(parts) >= 3 and parts[1] == self.PAIR_CODE:
+        elif msg == "pair?":
+            self.code_shown = True
+        elif msg.startswith("pair ") and len(parts) >= 3 and parts[1] == self.PAIR_CODE and self.code_shown:
             sess["role"] = "operate"
             await ws.send("paired operate " + self.TOKEN)
             await ws.send("role operate 1 " + " ".join(parts[2:]))

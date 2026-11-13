@@ -53,7 +53,8 @@ the whole buffer is not known, so the client merges both ways).
 
 Taken from the radio's web page code; the exact replies are partly inferred and **not yet confirmed on a real radio**.
 
-- A new device sends `pair <6-digit code> <name>`; the radio answers `paired <role> ...` (role `operate` or `admin`) and a
+- A new device first sends `pair?`, which makes the radio show a 6-digit code on its own screen for two minutes. It then
+  sends `pair <6-digit code> <name>`; the radio answers `paired <role> ...` (role `operate` or `admin`) and a
   key, which the device stores and sends first on later connections as `auth <key>`. Unpaired connections get `role view 0 -`.
 - `control take` / `control release` claim and release control. Key presses are `key NAME 1` then `key NAME 0`.
 - Keys the radio lists: POWER GEN KEY DFN PTT BAND_DOWN BAND_UP APP MSG DFL AM CW SSB F1-F5 AB PRE ATU VM AGC FST LOCK VOL MFK.

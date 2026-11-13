@@ -15,9 +15,10 @@ Observed on a real radio (firmware v0.3.9):
 
 The same socket also accepts radio key presses and device pairing (``pair <6-digit code> <name>`` answers
 ``paired <role> ...``; a paired device authenticates with ``auth <key>`` and then has the role ``operate`` or
-``admin``). This client sends only what :func:`is_allowed` accepts: the three subscription commands, pairing and
-auth, ``control take|release``, and presses of the few keys in :data:`KEY_NAMES`. It never sends POWER, PTT or any
-other key, and it presses keys only when the radio reports an operate/admin role.
+``admin``). ``pair?`` first makes the radio show the code on its screen. This client sends only what
+:func:`is_allowed` accepts: the three subscription commands, ``pair?``, pairing and auth, ``control take|release``,
+and presses of the few keys in :data:`KEY_NAMES`. It never sends POWER, PTT or any other key, and it presses keys
+only when the radio reports an operate/admin role.
 """
 from __future__ import annotations
 
@@ -39,7 +40,7 @@ PANEL_PORT = 50002
 MAGIC = 0xFFFF
 _HEADER = struct.Struct("<HHIII")
 HEADER_SIZE = _HEADER.size            # 16
-ALLOWED_COMMANDS = ("screen 0", "panel 1", "ping 1", "control take", "control release")
+ALLOWED_COMMANDS = ("screen 0", "panel 1", "ping 1", "control take", "control release", "pair?")
 KEY_NAMES = ("PRE", "AB", "VM", "FST", "ATU")          # the only radio keys this app will ever press
 _ALLOWED_RE = (re.compile(r"key (%s) [01]" % "|".join(KEY_NAMES)),
                re.compile(r"auth [0-9a-fA-F]{16,128}"),
@@ -152,6 +153,11 @@ class PanelClient:
             finally:
                 ka.cancel()
                 self._ws = None
+
+    async def request_pair_code(self) -> None:
+        """``pair?``: the radio shows a 6-digit pairing code on its screen for two minutes (as the web page does
+        when its Pair dialog opens)."""
+        await self._send("pair?")
 
     async def pair(self, code: str, name: str) -> None:
         """Ask the radio to pair this app. The reply arrives via ``on_paired``."""

@@ -11,7 +11,17 @@ def main(argv: list[str] | None = None) -> int:
                                  description="Desktop remote controller for the Xiegu X6100 (TCI)")
     ap.add_argument("address", nargs="?", help="radio address, e.g. 192.168.0.150 or 192.168.0.150:50001")
     ap.add_argument("--demo", action="store_true", help="run against a built-in fake radio (no hardware)")
+    ap.add_argument("--ptt", choices=["on", "off", "toggle"],
+                    help="tell the already running app to key/unkey the radio (use it from an OS keyboard shortcut)")
     args = ap.parse_args(argv)
+
+    if args.ptt:                                   # remote-control mode: no window, just talk to the running app
+        from PySide6.QtCore import QCoreApplication
+        from .ipc import send_command
+        QCoreApplication.instance() or QCoreApplication(sys.argv[:1])
+        reached, reply = send_command("ptt " + args.ptt)
+        print(reply, file=sys.stdout if reached and reply.startswith("ok") else sys.stderr)
+        return 0 if reached and reply.startswith("ok") else 1
 
     from PySide6.QtWidgets import QApplication
     from .gui.main_window import MainWindow
@@ -22,6 +32,8 @@ def main(argv: list[str] | None = None) -> int:
     worker = TciWorker()
     win = MainWindow(worker)
     win.show()
+    if not win.start_command_server():
+        print("note: another x6100-tci-remote is already running; --ptt will control that one", file=sys.stderr)
     if args.demo:
         from .fakeradio import serve_fake, serve_fake_panel
 
