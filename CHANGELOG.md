@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- `.deb`: only `python3` and `python3-venv` are hard dependencies now (the Qt system libraries are recommended), so apt cannot refuse
+  the install over a library name that differs on your distro. The file name carries the new version.
+
 ## 0.2.0
 
 Tested by the author against a real X6100 (OpenX6X00 firmware): spectrum, pairing, radio keys, CW decoder text and CW tuner.

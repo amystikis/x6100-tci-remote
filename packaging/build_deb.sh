@@ -8,8 +8,9 @@ cd "$(dirname "$0")/.."
 VER=$(python3 -c "import re;print(re.search(r'version = \"([^\"]+)\"', open('pyproject.toml').read()).group(1))")
 PKG=x6100-tci-remote
 ROOT=build/deb/${PKG}_${VER}
-DEPENDS="python3 (>= 3.10), python3-venv, libegl1, libgl1, libfontconfig1, libdbus-1-3, libxkbcommon-x11-0, libxcb-cursor0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-render-util0, libxcb-shape0, libxcb-xinerama0"
-RECOMMENDS="libpulse-mainloop-glib0"
+DEPENDS="python3 (>= 3.10), python3-venv"
+# Qt system libraries: Recommends, so a library with a different name on an older distro cannot block the install
+RECOMMENDS="libegl1, libgl1, libfontconfig1, libdbus-1-3, libxkbcommon-x11-0, libxcb-cursor0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-render-util0, libxcb-shape0, libxcb-xinerama0"
 
 rm -rf "$ROOT" && mkdir -p "$ROOT"/{DEBIAN,usr/bin,usr/lib/python3/dist-packages,usr/share/applications,usr/share/icons/hicolor/scalable/apps,usr/share/doc/$PKG}
 cp -r src/x6100_remote "$ROOT/usr/lib/python3/dist-packages/"

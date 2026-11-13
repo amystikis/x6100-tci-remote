@@ -34,7 +34,7 @@ packaging/build_deb.sh                         # writes build/x6100-tci-remote_<
 sudo apt install ./build/x6100-tci-remote_*_all.deb
 ```
 
-Releases on GitHub carry the built `.deb`. apt installs the Qt/xcb system libraries; the package's post-install step then
+Releases on GitHub carry the built `.deb`. If an install is refused, `sudo apt install -f` and the exact apt message tell you which library is missing. apt installs python3-venv and (as recommends) the Qt/xcb system libraries; the package's post-install step then
 creates `/opt/x6100-tci-remote/venv` and installs PySide6, websockets and numpy from PyPI into it (internet needed once;
 Debian/Ubuntu do not ship PySide6 under a stable package name, and their `websockets` is older than the version needed).
 If that step could not reach the internet, run the `pip install` line it prints. Removing the package deletes the venv.
