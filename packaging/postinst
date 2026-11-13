@@ -1,0 +1,15 @@
+#!/bin/sh
+# Install the Python dependencies (PySide6, websockets >= 13, numpy) from PyPI into a private virtualenv.
+set -e
+[ "$1" = "configure" ] || exit 0
+VENV="${X6100_VENV:-/opt/x6100-tci-remote/venv}"
+if [ ! -x "$VENV/bin/python" ]; then
+    mkdir -p "$(dirname "$VENV")"
+    python3 -m venv "$VENV"
+fi
+echo "x6100-tci-remote: installing PySide6, websockets and numpy from PyPI into $VENV ..."
+if ! PIP_DISABLE_PIP_VERSION_CHECK=1 "$VENV/bin/python" -m pip install --quiet "PySide6>=6.6" "websockets>=13" "numpy>=1.24"; then
+    echo "x6100-tci-remote: could not install the Python dependencies (no internet?). Run later:" >&2
+    echo "    sudo $VENV/bin/python -m pip install 'PySide6>=6.6' 'websockets>=13' 'numpy>=1.24'" >&2
+fi
+exit 0

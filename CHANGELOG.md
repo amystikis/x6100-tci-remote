@@ -12,7 +12,7 @@ Tested by the author against a real X6100 (OpenX6X00 firmware): spectrum, pairin
 - Drive slider sends live (throttled) on drag, wheel, keys and click.
 - CW tuner indicator: measures against the CW pitch (the radio's `kt`; VFO + pitch in CW, VFO - pitch in CW-R), meter at the
   top-left of the VFO line, DX spot labels keep clear of it.
-- Packaging: the `.deb` now ships docs and a copyright file, and recommends `libxcb-cursor0`.
+- Packaging: the `.deb` installs PySide6, websockets and numpy from PyPI into `/opt/x6100-tci-remote/venv` on install (needs internet once; Debian/Ubuntu do not package PySide6 under a stable name), depends on the Qt/xcb system libraries, and ships docs and a copyright file.
 
 ## 0.1.0
 

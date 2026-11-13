@@ -27,14 +27,18 @@ On Debian/Ubuntu, Qt may need `sudo apt install libxcb-cursor0` (error "could no
 
 ### Debian package
 
-Build and install a `.deb` (needs the PySide6 packages from your distro; otherwise use `pipx` above):
+Build and install a `.deb` (Debian, Ubuntu, Mint, Raspberry Pi OS):
 
 ```bash
 packaging/build_deb.sh                         # writes build/x6100-tci-remote_<version>_all.deb
 sudo apt install ./build/x6100-tci-remote_*_all.deb
 ```
 
-Releases on GitHub carry the built `.deb`. After installing, start it from the application menu or run `x6100-tci-remote`.
+Releases on GitHub carry the built `.deb`. apt installs the Qt/xcb system libraries; the package's post-install step then
+creates `/opt/x6100-tci-remote/venv` and installs PySide6, websockets and numpy from PyPI into it (internet needed once;
+Debian/Ubuntu do not ship PySide6 under a stable package name, and their `websockets` is older than the version needed).
+If that step could not reach the internet, run the `pip install` line it prints. Removing the package deletes the venv.
+Start the app from the application menu or run `x6100-tci-remote`.
 
 ## Run
 
