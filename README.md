@@ -6,13 +6,15 @@ audio, read the S-meter, see a **spectrum and waterfall** (click to tune), and (
 
 ![screenshot](docs/screenshot.png)
 
-## Status (be honest about it)
+## Status
 
-- The spectrum/waterfall format was captured from a real radio, but the widget itself has only been run against the fake radio so far.
-- Verified against a **fake radio** included in this repo, and against the real radio's announced init burst (passive probe).
-- **Not yet run against a real radio** end to end. Audio has not been tested on real hardware.
+- **Version 0.2.0.** The author has tested it against a real X6100 (OpenX6X00 firmware): tuning and mode, spectrum and
+  waterfall, pairing, the radio key buttons, the CW decoder text and the CW tuner indicator all work.
+- Automated tests run against a **fake radio** included in this repo (`x6100-tci-remote --demo`).
 - **Transmit is experimental.** Test only into a dummy load.
-- The radio does **not** stream IQ over TCI (tested with `scripts/probe_tci.py`), so there are no own demodulators. The spectrum comes from the radio's panel server (port 50002) instead.
+- The radio does **not** stream IQ over TCI (tested with `scripts/probe_tci.py`), so there are no own demodulators. The
+  spectrum comes from the radio's panel server (port 50002) instead.
+- Reply formats of the pairing exchange were partly inferred from the radio's web page; see `docs/PROTOCOL.md`.
 
 ## Install
 
@@ -23,7 +25,16 @@ pip install -e ".[gui]"          # or: pipx install ".[gui]"
 
 On Debian/Ubuntu, Qt may need `sudo apt install libxcb-cursor0` (error "could not load the Qt platform plugin xcb").
 
-Optional `.deb` (needs PySide6 packages available from your distro): `packaging/build_deb.sh`.
+### Debian package
+
+Build and install a `.deb` (needs the PySide6 packages from your distro; otherwise use `pipx` above):
+
+```bash
+packaging/build_deb.sh                         # writes build/x6100-tci-remote_<version>_all.deb
+sudo apt install ./build/x6100-tci-remote_*_all.deb
+```
+
+Releases on GitHub carry the built `.deb`. After installing, start it from the application menu or run `x6100-tci-remote`.
 
 ## Run
 

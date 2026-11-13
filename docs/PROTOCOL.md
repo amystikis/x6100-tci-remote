@@ -51,7 +51,7 @@ the whole buffer is not known, so the client merges both ways).
 
 ### Control over the panel socket (pairing and keys)
 
-Taken from the radio's web page code; the exact replies are partly inferred and **not yet confirmed on a real radio**.
+Taken from the radio's web page code; pairing and the key presses work on a real X6100 as implemented here (the author tested them); the reply field layout is still read tolerantly.
 
 - A new device first sends `pair?`, which makes the radio show a 6-digit code on its own screen for two minutes. It then
   sends `pair <6-digit code> <name>`; the radio answers `paired <role> ...` (role `operate` or `admin`) and a
@@ -60,3 +60,6 @@ Taken from the radio's web page code; the exact replies are partly inferred and 
 - Keys the radio lists: POWER GEN KEY DFN PTT BAND_DOWN BAND_UP APP MSG DFL AM CW SSB F1-F5 AB PRE ATU VM AGC FST LOCK VOL MFK.
   This app whitelists PRE, AB, VM, FST, ATU only. NB, NR, attenuator, squelch and RF gain have no key.
 - Other commands the page knows but this app does not use: `tune`, `vol`, `ft8`, `logq`, `sessions`, `revoke`, `unpair`, `away`.
+
+The `state` object also carries `kt`, the CW pitch in Hz (default 700 when absent). A tuned CW signal sits at VFO + `kt` in the
+spectrum in CW, VFO - `kt` in CW-R; the CW tuner indicator measures against that.

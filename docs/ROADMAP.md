@@ -1,15 +1,17 @@
 # Roadmap
 
-Done: remote control over TCI, RX audio, guarded TX, spectrum + waterfall from the panel server (port 50002).
+Done (0.2.0, tested on a real X6100): remote control over TCI, RX audio, guarded TX, spectrum + waterfall from the panel
+server (port 50002), band plan, DX spots, status strip, CW decoder text, CW tuner indicator (pitch based), radio key buttons
+with pairing, View toggles, OS-hotkey PTT, `.deb` packaging.
 
-1. **Real-radio validation** of the spectrum widget, RX audio quality (the radio's README mentions int16 mono 24 kHz while
-   it announces float32 stereo 48 kHz) and, into a dummy load, TX.
-2. Compare the CW tuner offset with the radio's own tuner and a known signal; adjust the bin convention if needed.
-3. Calibrate the spectrum level scale (compare bin values with the `m <dBm>` readings and a known signal) and add
+Open:
+
+1. Into a dummy load: TX. RX audio format (the radio's README mentions int16 mono 24 kHz, it announces float32 stereo 48 kHz).
+2. Calibrate the spectrum level scale (compare bin values with the `m <dBm>` readings and a known signal) and add
    zoom/reference-level controls.
-3. ~~Use the `spots`, `bands`, `plan`, `state`, `cw` data~~ (done). Still open: decoded FT8 messages, panel `state` updates, building the band buttons from the radio's own band list.
-4. Digital modes would need the radio's audio only (no IQ): decode FT8 from the RX audio, or bridge TCI to other software.
-5. Optional: browser/PWA front end, packaging as AppImage/Flatpak.
+3. Decoded FT8 messages from the panel, building the band buttons from the radio's own band list.
+4. Digital modes need the radio's audio only (no IQ): decode FT8 from the RX audio, or bridge TCI to other software.
+5. Optional: AppImage/Flatpak.
 
 IQ over TCI is not available on this firmware (verified), so an own-demodulator SDR is not possible.
 
