@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.3
+
+- The window now fits on 1920x1080 screens: tighter group-box padding, a smaller spectrum-view minimum, and an
+  initial size computed from the screen's available area instead of a hardcoded 760x1040. Window size and
+  position are now remembered across restarts.
+- Frequency display: click a digit to select it (shown with an underline), then Left/Right move the selection
+  and Up/Down change that digit, same as clicking its upper/lower half.
+
 ## 0.2.2
 
 - `.deb`: fix the app not starting after install. The code now lives in `/usr/lib/x6100-tci-remote` and the launcher puts it on
