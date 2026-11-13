@@ -23,7 +23,10 @@ def format_freq(hz: int) -> str:
 
 class FrequencyDisplay(QWidget):
     """Big VFO readout. Mouse wheel over a digit, or click its upper/lower half, tunes by
-    that digit's place value; double-click to type a frequency."""
+    that digit's place value; double-click to type a frequency.
+
+    Click a digit to select it (shown with an underline), then the Left/Right arrow keys move
+    the selection and Up/Down change the selected digit's place value."""
 
     tune = Signal(int)            # delta in Hz
     entered = Signal()            # double-click: ask for a typed frequency
@@ -34,6 +37,7 @@ class FrequencyDisplay(QWidget):
         self.locked = False
         self.setMinimumHeight(86)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         f = QFont()
         f.setFamilies(["DejaVu Sans Mono", "Liberation Mono", "Consolas", "Menlo", "Courier New", "monospace"])
         f.setStyleHint(QFont.StyleHint.Monospace)
@@ -42,6 +46,7 @@ class FrequencyDisplay(QWidget):
         self._font = f
         self.setFont(f)
         self._hover = -1
+        self._selected_place: int | None = None       # place value (1, 10, 100, ...) selected via click/arrows
 
     def set_freq(self, hz: int) -> None:
         self.freq = hz
@@ -75,7 +80,11 @@ class FrequencyDisplay(QWidget):
         e.accept()
 
     def mousePressEvent(self, e) -> None:
+        self.setFocus(Qt.FocusReason.MouseFocusReason)
         hit = self._hit(e.position().x())
+        if hit:
+            self._selected_place = hit[1]
+            self.update()
         if hit and not self.locked and e.button() == Qt.MouseButton.LeftButton:
             self.tune.emit(hit[1] * (1 if e.position().y() < self.height() / 2 else -1))
 
@@ -93,6 +102,35 @@ class FrequencyDisplay(QWidget):
         self._hover = -1
         self.update()
 
+    def focusInEvent(self, e) -> None:
+        self.update()
+        super().focusInEvent(e)
+
+    def focusOutEvent(self, e) -> None:
+        self.update()
+        super().focusOutEvent(e)
+
+    def keyPressEvent(self, e) -> None:
+        places = [p for _, _, p in self._digits()]
+        key = e.key()
+        if key in (Qt.Key.Key_Left, Qt.Key.Key_Right) and places:
+            if self._selected_place not in places:
+                idx = 0 if key == Qt.Key.Key_Right else len(places) - 1
+            else:
+                idx = places.index(self._selected_place) + (1 if key == Qt.Key.Key_Right else -1)
+                idx = max(0, min(len(places) - 1, idx))
+            self._selected_place = places[idx]
+            self.update()
+            e.accept()
+        elif key in (Qt.Key.Key_Up, Qt.Key.Key_Down) and places:
+            if self._selected_place not in places:
+                self._selected_place = places[-1]
+            if not self.locked:
+                self.tune.emit(self._selected_place * (1 if key == Qt.Key.Key_Up else -1))
+            e.accept()
+        else:
+            super().keyPressEvent(e)
+
     def paintEvent(self, e) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -102,6 +140,7 @@ class FrequencyDisplay(QWidget):
         p.setFont(self._font)
         text = format_freq(self.freq)
         digits = {i: r for i, r, _ in self._digits()}
+        places = {i: pl for i, _, pl in self._digits()}
         for i, ch in enumerate(text):
             if ch.isdigit():
                 r = digits[i]
@@ -109,6 +148,9 @@ class FrequencyDisplay(QWidget):
                     p.fillRect(r.adjusted(1, 8, -1, -8), QColor(240, 168, 48, 38))
                 p.setPen(DIM if self.locked else AMBER)
                 p.drawText(r, Qt.AlignmentFlag.AlignCenter, ch)
+                if self.hasFocus() and places[i] == self._selected_place:
+                    p.setPen(QPen(AMBER, 2))
+                    p.drawLine(int(r.left() + 6), int(r.bottom() - 6), int(r.right() - 6), int(r.bottom() - 6))
             else:
                 cw = QFontMetricsF(self._font).horizontalAdvance("0")
                 x = (self.width() - cw * len(text)) / 2 + i * cw
