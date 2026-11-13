@@ -310,6 +310,12 @@ class MainWindow(QMainWindow):
             m.addAction(act)
             setattr(self, "view_" + key + "_act", act)
         m.addSeparator()
+        self.cw_tuner_act = QAction("CW tuner indicator", self)
+        self.cw_tuner_act.setCheckable(True)
+        self.cw_tuner_act.setChecked(load_flag("cw_tuner"))
+        self.cw_tuner_act.toggled.connect(lambda on: (save_flag("cw_tuner", on), self.spectrum.set_show_cw_tuner(on)))
+        self.spectrum.set_show_cw_tuner(self.cw_tuner_act.isChecked())
+        m.addAction(self.cw_tuner_act)
         self.spots_act = QAction("DX spots on spectrum", self)
         self.spots_act.setCheckable(True)
         self.spots_act.setChecked(True)
@@ -368,7 +374,14 @@ class MainWindow(QMainWindow):
             self._build_filters()
             bw = abs(st.filter_hi - st.filter_lo)
             self.filter_lbl.setText("%d…%d Hz  (%.1f kHz)" % (st.filter_lo, st.filter_hi, bw / 1000))
-            self.spectrum.set_passband(st.filter_lo, st.filter_hi)
+            if st.mode in ("cw", "cwr"):
+                # the radio's CW filter is defined around the pitch; draw it centred on the VFO line, where the
+                # tuned signal sits, and switch the CW tuner bars on
+                self.spectrum.set_passband(-(bw // 2), bw // 2)
+                self.spectrum.set_cw_tuner(bw)
+            else:
+                self.spectrum.set_passband(st.filter_lo, st.filter_hi)
+                self.spectrum.set_cw_tuner(None)
             self._update_cw_visibility()
         if what in ("", "agc"):
             self.agc.setCurrentText(st.agc)

@@ -56,6 +56,15 @@ Until paired, the buttons only tell you so and send nothing. The app can only ev
 POWER or PTT). **Tune ATU** makes the radio transmit a carrier while it tunes, so it also needs "Enable transmit
 controls". With `--demo`, the fake radio's pairing code is `123456`.
 
+## CW tuner indicator
+
+In CW and CW-R the receive passband is drawn centred on the VFO line (the radio's own CW filter is defined around the
+pitch, so it used to look off to one side), and a row of vertical bars is drawn on the VFO line: the spectrum over the
+passband, with the strongest signal highlighted (green when it sits on the line, orange inside the passband, red outside)
+and its offset in Hz beside the meter. Tune until the offset is near 0. The offset is an estimate from the radio's
+spectrum bins (about 98 Hz per bin at the 100 kHz span), smoothed over frames: expect an accuracy of a few tens of Hz.
+Switch it off in View > CW tuner indicator.
+
 ## PTT from an OS keyboard shortcut
 
 While the app is running, this command keys or unkeys the radio, so any desktop keyboard shortcut can do it:

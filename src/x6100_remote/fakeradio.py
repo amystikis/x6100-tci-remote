@@ -195,7 +195,8 @@ class FakePanel:
         bins = 142 + rng.normal(0, 3, self.NBINS)
         hz_per_bin = self.SPAN / self.NBINS
         # a few carriers at fixed absolute frequencies, so they move when the fake VFO is retuned
-        for f, level, width in ((7_146_500, 30, 14), (7_153_200, 22, 10), (7_160_000, 38, 3), (7_141_000, 16, 25)):
+        for f, level, width in ((7_146_500, 30, 14), (7_153_200, 22, 10), (7_160_000, 38, 3), (7_141_000, 16, 25),
+                              (7_151_070, 34, 3)):          # a CW signal 70 Hz above the default VFO
             idx = (f - (center - self.SPAN / 2)) / hz_per_bin
             if -50 < idx < self.NBINS + 50:
                 x = np.arange(self.NBINS)

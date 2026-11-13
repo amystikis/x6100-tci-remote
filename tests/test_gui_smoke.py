@@ -274,3 +274,34 @@ def test_drive_slider_sends_on_wheel_keys_click_and_drag(env):
     win.drive.setValue(61)
     win.drive.sliderReleased.emit()                                          # release sends at once
     pump(lambda: radio.drive == 61)
+
+
+def test_cw_modes_centre_the_passband_and_enable_the_tuner(env):
+    from x6100_remote.fakeradio import serve_fake_panel
+    win, radio, pump = env
+    panel, pserver = asyncio.run_coroutine_threadsafe(serve_fake_panel(radio, 0), win.w.loop).result(5)
+    win.w.connect_panel("ws://127.0.0.1:%d/" % pserver.sockets[0].getsockname()[1])
+    pump(lambda: win.spectrum.frames >= 2)
+    assert win.spectrum._cw_bw is None and win.spectrum._passband == (win.state.filter_lo, win.state.filter_hi)
+    win.w.send("modulation", 0, "cw")
+    win.w.send("rx_filter_band", 0, 350, 1050)                              # a 700 Hz CW filter around a 700 Hz pitch
+    pump(lambda: win.state.mode == "cw" and win.state.filter_hi == 1050)
+    pump(lambda: win.spectrum._cw_bw == 700)
+    assert win.spectrum._passband == (-350, 350)                            # centred on the VFO line, not +350..+1050
+    pump(lambda: win.spectrum._cw_tune is not None)                         # the fake CW signal (~70 Hz above the VFO)
+    n = win.spectrum.frames
+    pump(lambda: win.spectrum.frames >= n + 25, 6)                          # let the smoothing settle
+    assert 45 < win.spectrum._cw_tune.offset_hz < 95
+    win.w.send("modulation", 0, "cwr")
+    pump(lambda: win.state.mode == "cwr")
+    assert win.spectrum._cw_bw == 700
+    win.cw_tuner_act.setChecked(False)
+    assert win.spectrum.show_cw_tuner is False
+    win.cw_tuner_act.setChecked(True)
+    win.w.send("modulation", 0, "usb")
+    win.w.send("rx_filter_band", 0, 50, 2850)
+    pump(lambda: win.state.mode == "usb" and win.state.filter_hi == 2850)
+    pump(lambda: win.spectrum._cw_bw is None)
+    assert win.spectrum._passband == (50, 2850)
+    win.w.disconnect_panel()
+    asyncio.run_coroutine_threadsafe(asyncio.sleep(0.05), win.w.loop).result(2)

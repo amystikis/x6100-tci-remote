@@ -6,6 +6,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
+from ..cwtuner import CwTune, analyze, smooth, window_half_width, window_levels
 from ..panelinfo import PLAN_CW, PLAN_DIGITAL, PLAN_PHONE, PlanSegment, Spot
 from ..spectrum import SpectrumFrame
 
@@ -77,6 +78,9 @@ class SpectrumView(QWidget):
         self._plan: list[PlanSegment] = []
         self._spots: list[Spot] = []
         self.show_spots = True
+        self.show_cw_tuner = True
+        self._cw_bw: int | None = None                # passband width (Hz) while in CW/CW-R, else None
+        self._cw_tune: CwTune | None = None
         self._spot_boxes: list[tuple[QRectF, Spot]] = []
 
     # data --------------------------------------------------------------------------------------
@@ -96,6 +100,16 @@ class SpectrumView(QWidget):
 
     def set_spots(self, spots: list[Spot]) -> None:
         self._spots = list(spots)
+        self.update()
+
+    def set_cw_tuner(self, bandwidth_hz: int | None) -> None:
+        """Enable the CW tuner indicator with the passband width (None: not in a CW mode)."""
+        self._cw_bw = bandwidth_hz
+        self._cw_tune = analyze(self._frame, bandwidth_hz) if (bandwidth_hz and self._frame) else None
+        self.update()
+
+    def set_show_cw_tuner(self, on: bool) -> None:
+        self.show_cw_tuner = on
         self.update()
 
     def set_show_spots(self, on: bool) -> None:
@@ -127,6 +141,7 @@ class SpectrumView(QWidget):
         self._wf[1:] = self._wf[:-1].copy()
         self._wf[0] = row
         self._level, self._frame = level, frame
+        self._cw_tune = smooth(self._cw_tune, analyze(frame, self._cw_bw), self._cw_bw) if self._cw_bw else None
         self.frames += 1
         self.update()
 
@@ -200,6 +215,7 @@ class SpectrumView(QWidget):
         self._paint_axis(p, f, w, ph)
         self._paint_plan(p, f, w, ph)
         self._paint_spots(p, f, w, ph)
+        self._paint_cw_tuner(p, f, w, ph)
         self._paint_waterfall(p, w, ph + AXIS_H, h - ph - AXIS_H)
         self._paint_markers(p, f, w, h)
         p.end()
@@ -280,6 +296,47 @@ class SpectrumView(QWidget):
             p.drawRect(box)
             p.drawText(box, Qt.AlignmentFlag.AlignCenter, spot.call)
             self._spot_boxes.append((box, spot))
+
+    def _paint_cw_tuner(self, p: QPainter, f: SpectrumFrame, w: int, ph: int) -> None:
+        """Vertical bars centred on the VFO line: the spectrum over the passband (and a bit more), the bar of the
+        strongest signal coloured by how well it is aligned, and its offset in Hz."""
+        if self._cw_bw is None or not self.show_cw_tuner or self._level is None:
+            return
+        bw = float(self._cw_bw)
+        half = min(window_half_width(bw), f.span_hz / 2.0)
+        n, bar_h = 21, 34
+        top = max(AXIS_H, ph - bar_h - 6)
+        strip_w = max(110.0, min(230.0, w * 0.3))                  # a fixed-size meter, not tied to the span
+        x0, x1 = w / 2 - strip_w / 2, w / 2 + strip_w / 2
+        p.fillRect(QRectF(x0, top - 3, x1 - x0, bar_h + 6), QColor(5, 10, 20, 190))
+        levels = np.clip(window_levels(f, half, n, values=self._level), 0.0, 1.0)
+        bar_w = (x1 - x0) / n
+        tune = self._cw_tune
+        peak_i = None
+        if tune is not None and abs(tune.offset_hz) < half:
+            peak_i = min(n - 1, max(0, int((tune.offset_hz + half) / (2 * half) * n)))
+        for i, lvl in enumerate(levels):
+            offset = -half + (i + 0.5) * (2 * half / n)
+            colour = QColor("#f0a830") if abs(offset) <= bw / 2 else QColor("#55637d")
+            if i == peak_i:
+                colour = QColor("#3ddc97") if tune.aligned else QColor("#ff8a4c" if tune.in_passband else "#ff5a5a")
+            h = max(2.0, bar_h * float(lvl))
+            p.fillRect(QRectF(x0 + i * bar_w + 1, top + bar_h - h, max(1.0, bar_w - 2), h), colour)
+        # label with the offset
+        font = QFont(self.font())
+        font.setPixelSize(11)
+        font.setBold(True)
+        p.setFont(font)
+        if tune is None:
+            text, colour = "CW  no signal", QColor("#6f819f")
+        else:
+            text = "%+d Hz%s" % (round(tune.offset_hz), "  on tone" if tune.aligned else "")
+            colour = QColor("#3ddc97") if tune.aligned else QColor("#ff8a4c" if tune.in_passband else "#ff5a5a")
+        lx = x1 + 6 if x1 + 112 < w else x0 - 112                   # label beside the meter
+        ly = top + bar_h / 2 - 8
+        p.fillRect(QRectF(lx, ly, 106, 16), QColor(5, 10, 20, 215))
+        p.setPen(colour)
+        p.drawText(QRectF(lx, ly, 106, 16), Qt.AlignmentFlag.AlignCenter, text)
 
     def _paint_waterfall(self, p: QPainter, w: int, top: int, height: int) -> None:
         if height <= 0 or self._wf is None:
