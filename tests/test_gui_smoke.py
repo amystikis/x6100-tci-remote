@@ -141,7 +141,7 @@ def test_panel_info_shows_in_window(env):
     win.w.send("modulation", 0, "cw")
     pump(lambda: not win.cw_box.isHidden())
     assert "CQ CQ DE" in win.cw_view.toPlainText()
-    assert win.cw_view.height() >= 80
+    assert win.cw_view.height() == 54
     assert len(win.spectrum._plan) == 4 and len(win.spectrum._spots) == 5
     win.spots_act.setChecked(False)
     assert win.spectrum.show_spots is False

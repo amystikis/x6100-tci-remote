@@ -132,7 +132,7 @@ class MainWindow(QMainWindow):
         cwl = QHBoxLayout(self.cw_box)
         self.cw_view = QPlainTextEdit()
         self.cw_view.setReadOnly(True)
-        self.cw_view.setFixedHeight(88)          # 4 lines
+        self.cw_view.setFixedHeight(54)          # 2 lines
         self.cw_view.setMaximumBlockCount(500)
         self.cw_view.setStyleSheet("font-family:monospace; font-size:14px; color:#f0a830;")
         cwl.addWidget(self.cw_view, 1)
