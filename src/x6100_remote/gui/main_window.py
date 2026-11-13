@@ -119,10 +119,26 @@ class MainWindow(QMainWindow):
         info.addWidget(_btn("◀ −", slot=lambda: self.tune_by(-self.step.currentData())))
         info.addWidget(_btn("+ ▶", slot=lambda: self.tune_by(self.step.currentData())))
         v.addLayout(info)
+        self.status_strip = QLabel("")
+        self.status_strip.setTextFormat(Qt.TextFormat.RichText)
+        self.status_strip.setToolTip("Radio status as reported by the radio's panel server (read-only)")
+        self.status_strip.hide()
+        v.addWidget(self.status_strip)
         self.spectrum = SpectrumView()
         self.spectrum.tune_to.connect(self.tune_to)
         self.spectrum.step.connect(lambda d: self.tune_by(d * self.step.currentData()))
         v.addWidget(self.spectrum, 1)
+        self.cw_box = QGroupBox("CW decoder (decoded by the radio)")
+        cwl = QHBoxLayout(self.cw_box)
+        self.cw_view = QPlainTextEdit()
+        self.cw_view.setReadOnly(True)
+        self.cw_view.setFixedHeight(54)
+        self.cw_view.setMaximumBlockCount(500)
+        self.cw_view.setStyleSheet("font-family:monospace; font-size:14px; color:#f0a830;")
+        cwl.addWidget(self.cw_view, 1)
+        cwl.addWidget(_btn("Clear", slot=self.cw_view.clear))
+        self.cw_box.hide()
+        v.addWidget(self.cw_box)
         self.smeter = SMeter()
         v.addWidget(self.smeter)
 
@@ -242,6 +258,11 @@ class MainWindow(QMainWindow):
         act = self.dock.toggleViewAction()
         act.setText("Protocol log")
         m.addAction(act)
+        self.spots_act = QAction("DX spots on spectrum", self)
+        self.spots_act.setCheckable(True)
+        self.spots_act.setChecked(True)
+        self.spots_act.toggled.connect(self.spectrum.set_show_spots)
+        m.addAction(self.spots_act)
         self.spectrum.setVisible(self.spectrum_act.isChecked())
         h = self.menuBar().addMenu("&Help")
         about = QAction("About", self)
@@ -261,6 +282,7 @@ class MainWindow(QMainWindow):
         self.w.audio.connect(self.rx.push)
         self.w.spectrum.connect(self.spectrum.push)
         self.w.panel_status.connect(self.on_panel_status)
+        self.w.panel_info.connect(self.on_panel_info)
         self.w.raw.connect(lambda s: self.log.appendPlainText(s) if self.dock.isVisible() else None)
         self.resize(760, 1040)
 
@@ -292,6 +314,7 @@ class MainWindow(QMainWindow):
             bw = abs(st.filter_hi - st.filter_lo)
             self.filter_lbl.setText("%d…%d Hz  (%.1f kHz)" % (st.filter_lo, st.filter_hi, bw / 1000))
             self.spectrum.set_passband(st.filter_lo, st.filter_hi)
+            self._update_cw_visibility()
         if what in ("", "agc"):
             self.agc.setCurrentText(st.agc)
         if what in ("", "rit_enable", "rit_offset"):
@@ -504,8 +527,42 @@ class MainWindow(QMainWindow):
         self.w.connect_to(url)
         if self.spectrum_act.isChecked():
             self.spectrum.clear()
+            self.spectrum.set_plan([])
+            self.spectrum.set_spots([])
+            self.cw_view.clear()
+            self.status_strip.hide()
             self.spectrum.set_message("Waiting for spectrum...")
             self.w.connect_panel(self._panel_url)
+
+    def on_panel_info(self, kind: str) -> None:
+        info = self.w.info
+        if kind == "plan":
+            self.spectrum.set_plan(info.plan)
+        elif kind == "spots":
+            self.spectrum.set_spots(info.spots)
+        elif kind in ("state", "ft8"):
+            self._update_status_strip()
+        elif kind == "cw":
+            self.cw_view.setPlainText(info.cw_text)
+            self.cw_view.verticalScrollBar().setValue(self.cw_view.verticalScrollBar().maximum())
+            self._update_cw_visibility()
+
+    def _update_status_strip(self) -> None:
+        info = self.w.info
+        parts = []
+        for label, value, on in info.status_items():
+            color = "#f0a830" if on else "#55637d"
+            parts.append("<span style='color:#8ea0bd'>%s</span> <span style='color:%s'>%s</span>"
+                         % (label, color, value))
+        ft8 = info.ft8
+        if ft8.get("open"):
+            tag = "TX" if ft8.get("tx") else "RX"
+            parts.append("<span style='color:#3ddc97'>FT8 app open (%s)</span>" % tag)
+        self.status_strip.setText("&nbsp;&nbsp;·&nbsp;&nbsp;".join(parts))
+        self.status_strip.setVisible(bool(parts))
+
+    def _update_cw_visibility(self) -> None:
+        self.cw_box.setVisible(bool(self.w.info.cw_text.strip()) or self.state.mode in ("cw", "cwr"))
 
     def on_panel_status(self, state: str, detail: str) -> None:
         if state == "connected":

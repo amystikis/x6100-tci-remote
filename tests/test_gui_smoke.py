@@ -123,3 +123,19 @@ def test_spectrum_flows_into_view_and_click_tunes(env):
     pump(lambda: win.spectrum._frame.center_hz == 7_152_340)               # spectrum re-centres
     win.w.disconnect_panel()
     asyncio.run_coroutine_threadsafe(asyncio.sleep(0.05), win.w.loop).result(2)
+
+
+def test_panel_info_shows_in_window(env):
+    from x6100_remote.fakeradio import serve_fake_panel
+    win, radio, pump = env
+    panel, pserver = asyncio.run_coroutine_threadsafe(serve_fake_panel(radio, 0), win.w.loop).result(5)
+    win.w.connect_panel("ws://127.0.0.1:%d/" % pserver.sockets[0].getsockname()[1])
+    pump(lambda: len(win.w.info.spots) == 5 and win.cw_view.toPlainText() != "")
+    assert "PWR" in win.status_strip.text() and "5 W" in win.status_strip.text() and "FT8" in win.status_strip.text()
+    assert not win.status_strip.isHidden() and not win.cw_box.isHidden()
+    assert "CQ CQ DE" in win.cw_view.toPlainText()
+    assert len(win.spectrum._plan) == 4 and len(win.spectrum._spots) == 5
+    win.spots_act.setChecked(False)
+    assert win.spectrum.show_spots is False
+    win.w.disconnect_panel()
+    asyncio.run_coroutine_threadsafe(asyncio.sleep(0.05), win.w.loop).result(2)

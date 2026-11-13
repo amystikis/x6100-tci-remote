@@ -7,6 +7,7 @@ from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, Signal
 
+from ..panelinfo import PanelInfo
 from ..spectrum import PanelClient
 from ..tci import Command, RadioState, TciClient
 
@@ -17,6 +18,7 @@ class TciWorker(QObject):
     audio = Signal(bytes, int)      # float32 interleaved stereo, sample rate
     raw = Signal(str)               # every text command, for the protocol log
     spectrum = Signal(object)       # SpectrumFrame from the panel server
+    panel_info = Signal(str)        # "spots" | "bands" | "plan" | "state" | "cw" | "ft8" (data is in worker.info)
     panel_status = Signal(str, str)  # same states as `status`, for the spectrum feed
 
     def __init__(self) -> None:
@@ -31,6 +33,7 @@ class TciWorker(QObject):
         self._announced = False
         self._tx_source: Optional[Callable] = None
         self._audio_on = False
+        self.info = PanelInfo()
         self._panel_task: Optional[asyncio.Task] = None
         self._panel_want = False
 
@@ -112,6 +115,7 @@ class TciWorker(QObject):
 
     async def _connect_panel(self, url: str) -> None:
         await self._disconnect_panel()
+        self.info = PanelInfo()                           # never show another radio's spots or bands
         self._panel_want = True
         self._panel_task = self.loop.create_task(self._panel_session(url))
 
@@ -126,7 +130,8 @@ class TciWorker(QObject):
         backoff = 1
         while self._panel_want:
             self.panel_status.emit("connecting", url)
-            c = PanelClient(url)
+            c = PanelClient(url, info=self.info)
+            c.on_info = self.panel_info.emit
             c.on_open = lambda: self.panel_status.emit("connected", "")
             c.on_frame = self.spectrum.emit
             reason = "connection closed"

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import math
 import random
 
@@ -168,6 +169,15 @@ class FakePanel:
     SPAN = 100_000
     NBINS = 1024
     FPS = 14
+    SPOT_PERIOD = 15.0                # seconds between spot lists, as on the real radio
+    BANDS = [{"n": "80m", "a": 3500000, "b": 3800000}, {"n": "40m", "a": 7000000, "b": 7300000},
+             {"n": "20m", "a": 14000000, "b": 14350000}]
+    PLAN = [[7000000, 7040000, 0], [7040000, 7060000, 1], [7060000, 7200000, 2], [7200000, 7300000, 3]]
+    SPOTS = [{"f": 7_146_000, "c": "DL1ABC", "m": "SSB", "a": 2, "s": "G4XYZ-#", "k": "CQ DX", "al": 0},
+             {"f": 7_150_400, "c": "AC4WW", "m": "CW", "a": 0, "s": "WB6BEE-#", "k": "POTA US-9774 CW", "al": 0},
+             {"f": 7_150_900, "c": "SP9XYZ", "m": "SSB", "a": 25, "s": "DK0ABC", "k": "", "al": 0},
+             {"f": 7_158_000, "c": "K1TTT", "m": "SSB", "a": 5, "s": "N2AB", "k": "SOTA W1/HA-001", "al": 1},
+             {"f": 7_043_000, "c": "EA8ZZ", "m": "FT8", "a": 1, "s": "EA4A", "k": "", "al": 0}]
 
     def __init__(self, radio: FakeRadio) -> None:
         self.radio = radio
@@ -192,6 +202,25 @@ class FakePanel:
             self.seq += 1
             await ws.send(pack_frame(self.radio.vfo[0], self.SPAN, self.seq, self.spectrum_bins(self.radio.vfo[0])))
 
+    def info_lines(self) -> list[str]:
+        return ["bands " + json.dumps(self.BANDS, separators=(",", ":")),
+                "plan " + json.dumps(self.PLAN, separators=(",", ":")),
+                "state " + json.dumps({"freq": self.radio.vfo[0], "mode": 0, "flo": 50, "fhi": 3050, "pre": 1,
+                                       "att": 0, "nb": 0, "nr": 1, "sql": 0, "rfg": 70, "vol": 20, "pwr": 5.0,
+                                       "step": 500, "zoom": 4, "atu": 1, "bat": 76, "tx": 0, "lock": 0},
+                                      separators=(",", ":")),
+                "ft8 " + json.dumps({"open": 1, "tx": 0, "next": "", "logged": ""}, separators=(",", ":")),
+                "cw " + json.dumps("CQ CQ DE "),
+                "spots " + json.dumps(self.SPOTS, separators=(",", ":"))]
+
+    async def info_loop(self, ws) -> None:
+        n = 0
+        while True:
+            await asyncio.sleep(self.SPOT_PERIOD)
+            n += 1
+            await ws.send("spots " + json.dumps(self.SPOTS, separators=(",", ":")))
+            await ws.send("cw " + json.dumps("K1TTT %d " % n))
+
     async def screen_loop(self, ws) -> None:
         while True:
             await asyncio.sleep(0.11)
@@ -207,8 +236,9 @@ class FakePanel:
                 loops.pop(name).cancel()
 
         try:
-            for line in ("hello OpenX6X00 - fake", "size 800 480", "role view 0 -", "ctl none 0"):
+            for line in ("hello OpenX6X00 - fake", "size 800 480", "role view 0 -", "ctl none 0", *self.info_lines()):
                 await ws.send(line)
+            loops["info"] = asyncio.ensure_future(self.info_loop(ws))
             async for msg in ws:
                 if not isinstance(msg, str):
                     continue

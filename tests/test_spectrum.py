@@ -129,3 +129,99 @@ def test_waterfall_shifts_when_vfo_changes(qapp=None):
     assert int(np.argmax(v._wf[1])) == 250
     v.resize(600, 400)
     v.grab()                                                               # paints without error
+
+
+# ---- panel info (bands, plan, spots, state, cw) -----------------------------------------------------
+from x6100_remote.panelinfo import PanelInfo, merge_cw  # noqa: E402
+
+# lines copied from a real radio (firmware v0.3.9)
+REAL_SPOTS = ('spots [{"f":7043000,"c":"AC4WW","m":"CW","a":0,"s":"WB6BEE-#","k":"POTA US-9774 CW","al":0},'
+              '{"f":7183000,"c":"AC1RH","m":"SSB","a":0,"s":"VA2YH","k":"POTA US-0449 SSB","al":0}]')
+REAL_STATE = ('state {"freq":7174000,"mode":0,"flo":50,"fhi":3050,"kt":700,"agc":0,"pre":1,"att":0,"nb":0,"nr":0,'
+              '"sql":0,"rfg":70,"vol":0,"pwr":2.5,"step":500,"zoom":4,"vfo":0,"atu":0,"bat":-1,"tx":0,"lock":0,'
+              '"tune":0,"tune_s":15,"ulock":0,"cwrise":0}')
+
+
+def test_panelinfo_parses_real_lines():
+    i = PanelInfo()
+    assert i.apply(REAL_SPOTS) == "spots" and len(i.spots) == 2
+    s = i.spots[0]
+    assert (s.freq, s.call, s.mode, s.age, s.spotter, s.comment, s.alert) == (
+        7043000, "AC4WW", "CW", 0, "WB6BEE-#", "POTA US-9774 CW", False)
+    assert i.spots_in(7_100_000, 7_200_000)[0].call == "AC1RH"
+    assert i.apply('plan [[1810000,1838000,0],[1838000,1843000,1],[1843000,2000000,2]]') == "plan"
+    assert [(p.lo, p.kind) for p in i.plan] == [(1810000, 0), (1838000, 1), (1843000, 2)]
+    assert i.apply('bands [{"n":"160m","a":1810000,"b":2000000}]') == "bands" and i.bands[0].name == "160m"
+    assert i.apply(REAL_STATE) == "state" and i.battery is None
+    labels = {k: (v, on) for k, v, on in i.status_items()}
+    assert labels["PRE"] == ("1", True) and labels["NB"] == ("off", False) and labels["PWR"] == ("2.5 W", True)
+    assert "BAT" not in labels                                              # bat -1 = unknown
+    i.apply('state {"bat":18}')
+    assert dict((k, on) for k, _, on in i.status_items())["BAT"] is True    # low battery highlighted
+    assert i.apply('ft8 {"open":0,"tx":0}') == "ft8" and i.ft8["open"] == 0
+
+
+def test_panelinfo_ignores_junk():
+    i = PanelInfo()
+    for line in ("m -101.5", "spots not-json", 'plan [[1,2]]', "bands [{}]", "", "keys POWER GEN", "unknown 1"):
+        assert i.apply(line) is None
+    assert i.spots == [] and i.plan == [] and i.bands == []
+
+
+def test_merge_cw_handles_increments_and_full_buffers():
+    assert merge_cw("", "CQ ") == "CQ "
+    assert merge_cw("CQ CQ ", "DE K1TTT ") == "CQ CQ DE K1TTT "          # increments
+    assert merge_cw("CQ CQ ", "CQ CQ DE K1") == "CQ CQ DE K1"            # growing buffer
+    assert merge_cw("CQ CQ DE K1", "CQ CQ DE K1") == "CQ CQ DE K1"       # repeat
+    assert len(merge_cw("x" * 5000, "abc")) <= 4000
+
+
+def test_client_collects_info_from_fake_panel():
+    async def body():
+        radio = FakeRadio()
+        _, server = await serve_fake_panel(radio, 0)
+        c = PanelClient("ws://127.0.0.1:%d/" % server.sockets[0].getsockname()[1])
+        kinds: list[str] = []
+        c.on_info = kinds.append
+        task = asyncio.ensure_future(c.run())
+        try:
+            for _ in range(100):
+                if "spots" in kinds:
+                    break
+                await asyncio.sleep(0.02)
+            assert {"bands", "plan", "state", "ft8", "cw", "spots"} <= set(kinds)
+            assert c.info.hello.startswith("OpenX6X00") and len(c.info.spots) == 5
+        finally:
+            await c.close()
+            task.cancel()
+            server.close()
+            await server.wait_closed()
+    asyncio.run(body())
+
+
+def test_spot_layout_hit_testing_and_band_plan():
+    from PySide6.QtWidgets import QApplication
+    from x6100_remote.panelinfo import PlanSegment, Spot
+    QApplication.instance() or QApplication([])
+    v = SpectrumView(rows=8)
+    v.resize(800, 500)
+    v.push(SpectrumFrame(7_150_000, 100_000, 1, np.full(1024, 140, dtype=np.uint8)))
+    v.set_plan([PlanSegment(7_000_000, 7_040_000, 0), PlanSegment(7_060_000, 7_200_000, 2)])
+    v.set_spots([Spot(7_150_400, "AC4WW", "CW"), Spot(7_150_900, "SP9XYZ", "SSB"), Spot(8_000_000, "FAR", "CW")])
+    v.grab()
+    calls = {s.call for _, s in v._spot_boxes}
+    assert calls == {"AC4WW", "SP9XYZ"}                                     # out-of-view spot not drawn
+    box, spot = v._spot_boxes[0]
+    hit = v.spot_at(box.center().x(), box.center().y())
+    assert hit is spot and v.spot_at(5, 400) is None
+    tuned = []
+    v.tune_to.connect(tuned.append)
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    pos = QPointF(box.center().x() + 3, box.center().y())
+    v.mousePressEvent(QMouseEvent(QEvent.Type.MouseButtonPress, pos, pos, Qt.MouseButton.LeftButton,
+                                  Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
+    assert tuned == [spot.freq]                                             # exact spot frequency, not snapped
+    v.set_show_spots(False)
+    v.grab()
+    assert v._spot_boxes == [] and v.spot_at(box.center().x(), box.center().y()) is None

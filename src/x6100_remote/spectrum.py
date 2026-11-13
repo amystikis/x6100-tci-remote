@@ -3,7 +3,8 @@
 Observed on a real radio (firmware v0.3.9):
 
 * The server sends text lines on connect (``hello ...``, ``size 800 480``, ``role view 0 -``, ...) and then
-  ``m <dBm>`` S-meter lines. Those are ignored here.
+  ``m <dBm>`` S-meter lines. Descriptive lines (bands, plan, spots, state, cw, ft8) are decoded by
+  :mod:`x6100_remote.panelinfo`; the rest is ignored.
 * ``screen 0`` stops the ~55 kB JPEG screen frames, ``panel 1`` starts the spectrum frames.
 * A spectrum frame is a binary message of 16 + 1024 bytes (little endian)::
 
@@ -25,6 +26,8 @@ from typing import Callable, Optional
 
 import numpy as np
 import websockets
+
+from .panelinfo import PanelInfo
 
 log = logging.getLogger(__name__)
 
@@ -75,9 +78,11 @@ class PanelClient:
     every spectrum frame.
     """
 
-    def __init__(self, url: str, keepalive: float = 15.0) -> None:
+    def __init__(self, url: str, keepalive: float = 15.0, info: Optional[PanelInfo] = None) -> None:
         self.url = url
         self.keepalive = keepalive
+        self.info = info if info is not None else PanelInfo()
+        self.on_info: Optional[Callable[[str], None]] = None      # called with "spots", "bands", "cw", ...
         self.on_open: Optional[Callable[[], None]] = None
         self.on_frame: Optional[Callable[[SpectrumFrame], None]] = None
         self.frames = 0
@@ -106,6 +111,9 @@ class PanelClient:
             try:
                 async for msg in ws:
                     if isinstance(msg, str):
+                        kind = self.info.apply(msg)
+                        if kind and self.on_info:
+                            self.on_info(kind)
                         continue
                     frame = parse_frame(msg)
                     if frame is not None:

@@ -39,6 +39,14 @@ The app also connects to the radio's panel server (port 50002, the same server a
 Click the spectrum to tune, scroll the wheel to step. The orange band is the receive passband. Level scaling is
 automatic (the radio's bin values are not calibrated). Hide it with View > Spectrum & waterfall.
 
+### Extras from the panel server
+
+- **Band plan** as a coloured strip under the frequency axis (blue CW, purple digital, green phone, grey other).
+- **DX spots** (the radio's cluster feed) as call-sign labels on the spectrum: click one to tune to its exact
+  frequency, hover for comment and spotter. Toggle in View > DX spots on spectrum.
+- **Radio status strip**: preamp, attenuator, NB, NR, squelch, RF gain, power, tuner, battery, FT8 app open (read-only).
+- **CW decoder** text decoded by the radio, shown when you are in CW or text arrives.
+
 ## Safety
 
 - Transmit controls are off until you tick "Enable transmit controls".

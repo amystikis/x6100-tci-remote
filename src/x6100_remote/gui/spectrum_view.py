@@ -3,12 +3,19 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
+from ..panelinfo import PLAN_CW, PLAN_DIGITAL, PLAN_PHONE, PlanSegment, Spot
 from ..spectrum import SpectrumFrame
 
 AXIS_H = 18
+PLAN_H = 4
+SPOT_LANES = 3
+SPOT_LANE_H = 13
+PLAN_COLORS = {PLAN_CW: "#3b82f6", PLAN_DIGITAL: "#a855f7", PLAN_PHONE: "#22c55e"}
+PLAN_OTHER_COLOR = "#64748b"
+SPOT_COLORS = {"CW": "#f0a830", "SSB": "#4cc9f0"}
 TICK_STEPS = (500, 1000, 2000, 2500, 5000, 10_000, 20_000, 50_000, 100_000, 250_000, 500_000)
 
 
@@ -67,6 +74,10 @@ class SpectrumView(QWidget):
         self._hover: float | None = None
         self._message = "No spectrum"
         self.frames = 0
+        self._plan: list[PlanSegment] = []
+        self._spots: list[Spot] = []
+        self.show_spots = True
+        self._spot_boxes: list[tuple[QRectF, Spot]] = []
 
     # data --------------------------------------------------------------------------------------
     def set_message(self, text: str) -> None:
@@ -78,6 +89,26 @@ class SpectrumView(QWidget):
         """Receive passband as offsets (Hz) from the carrier/VFO."""
         self._passband = (lo, hi)
         self.update()
+
+    def set_plan(self, plan: list[PlanSegment]) -> None:
+        self._plan = list(plan)
+        self.update()
+
+    def set_spots(self, spots: list[Spot]) -> None:
+        self._spots = list(spots)
+        self.update()
+
+    def set_show_spots(self, on: bool) -> None:
+        self.show_spots = on
+        self.update()
+
+    def spot_at(self, x: float, y: float) -> Spot | None:
+        if not self.show_spots:
+            return None
+        for box, spot in self._spot_boxes:
+            if box.adjusted(-2, -1, 2, 1).contains(x, y):
+                return spot
+        return None
 
     def clear(self) -> None:
         self._frame = self._wf = self._level = None
@@ -129,6 +160,8 @@ class SpectrumView(QWidget):
     # input ---------------------------------------------------------------------------------------
     def mouseMoveEvent(self, e) -> None:
         self._hover = e.position().x()
+        spot = self.spot_at(e.position().x(), e.position().y())
+        self.setToolTip(spot.describe() if spot else "")
         self.update()
 
     def leaveEvent(self, e) -> None:
@@ -136,8 +169,14 @@ class SpectrumView(QWidget):
         self.update()
 
     def mousePressEvent(self, e) -> None:
+        if e.button() != Qt.MouseButton.LeftButton:
+            return
+        spot = self.spot_at(e.position().x(), e.position().y())
+        if spot is not None:
+            self.tune_to.emit(spot.freq)                     # exact spot frequency
+            return
         hz = self._hz_at(e.position().x())
-        if hz is not None and e.button() == Qt.MouseButton.LeftButton:
+        if hz is not None:
             self.tune_to.emit(int(round(hz / 10.0)) * 10)
 
     def wheelEvent(self, e) -> None:
@@ -159,6 +198,8 @@ class SpectrumView(QWidget):
         ph = self._plot_h()
         self._paint_trace(p, f, w, ph)
         self._paint_axis(p, f, w, ph)
+        self._paint_plan(p, f, w, ph)
+        self._paint_spots(p, f, w, ph)
         self._paint_waterfall(p, w, ph + AXIS_H, h - ph - AXIS_H)
         self._paint_markers(p, f, w, h)
         p.end()
@@ -199,6 +240,46 @@ class SpectrumView(QWidget):
             lx = min(max(x, 34.0), w - 34.0)
             p.drawText(QRectF(lx - 34, ph + 2, 68, AXIS_H - 2), Qt.AlignmentFlag.AlignCenter, label)
             hz += step
+
+    def _paint_plan(self, p: QPainter, f: SpectrumFrame, w: int, ph: int) -> None:
+        lo, hi = f.center_hz - f.span_hz / 2, f.center_hz + f.span_hz / 2
+        y = ph + AXIS_H - PLAN_H
+        for seg in self._plan:
+            if seg.hi < lo or seg.lo > hi:
+                continue
+            x1, x2 = self._x_of(max(seg.lo, lo)), self._x_of(min(seg.hi, hi))
+            p.fillRect(QRectF(x1, y, max(1.0, x2 - x1), PLAN_H), QColor(PLAN_COLORS.get(seg.kind, PLAN_OTHER_COLOR)))
+
+    def _paint_spots(self, p: QPainter, f: SpectrumFrame, w: int, ph: int) -> None:
+        self._spot_boxes = []
+        if not self.show_spots or not self._spots:
+            return
+        lo, hi = f.center_hz - f.span_hz / 2, f.center_hz + f.span_hz / 2
+        font = QFont(self.font())
+        font.setPixelSize(10)
+        p.setFont(font)
+        fm = QFontMetricsF(font)
+        lane_end = [-1e9] * SPOT_LANES
+        for spot in sorted((s for s in self._spots if lo <= s.freq <= hi), key=lambda s: (s.age, s.freq)):
+            x = self._x_of(spot.freq)
+            tw = fm.horizontalAdvance(spot.call) + 6
+            left = min(max(x - tw / 2, 1.0), w - tw - 1)
+            lane = next((i for i in range(SPOT_LANES) if left > lane_end[i] + 2), None)
+            if lane is None:
+                continue                                       # no room, skip rather than overlap
+            lane_end[lane] = left + tw
+            box = QRectF(left, 2 + lane * SPOT_LANE_H, tw, SPOT_LANE_H - 1)
+            color = QColor(SPOT_COLORS.get(spot.mode.upper(), "#a0a8b8"))
+            color.setAlpha(255 if spot.age <= 20 else 140)
+            stem = QColor(color)
+            stem.setAlpha(110)
+            p.setPen(QPen(stem, 1))
+            p.drawLine(int(x), int(box.bottom()), int(x), ph)
+            p.fillRect(box, QColor(5, 10, 20, 215))
+            p.setPen(QPen(QColor("#ffffff") if spot.alert else color, 1))
+            p.drawRect(box)
+            p.drawText(box, Qt.AlignmentFlag.AlignCenter, spot.call)
+            self._spot_boxes.append((box, spot))
 
     def _paint_waterfall(self, p: QPainter, w: int, top: int, height: int) -> None:
         if height <= 0 or self._wf is None:

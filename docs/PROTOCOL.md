@@ -41,3 +41,10 @@ Bin values are an uncalibrated level scale (typically 128-175 on a quiet band); 
 (`screen 1`) are an 8-byte header (`u16 800, u16 480, u32 counter`) followed by a JPEG.
 
 IQ is **not** offered over TCI: `iq_start` at 96 kHz produced no binary frames.
+
+### Descriptive text messages on the panel server
+
+Decoded by `src/x6100_remote/panelinfo.py` (formats and examples are in its docstring): `bands`, `plan`
+(`[lo, hi, kind]`, kind 0 CW / 1 digital / 2 phone / 3 other, inferred), `spots` (resent about every 15 s; `a` looks like age in
+minutes), `state` (sent on connect; later updates not yet observed), `ft8` and `cw` (decoded text; whether it sends increments or
+the whole buffer is not known, so the client merges both ways).
