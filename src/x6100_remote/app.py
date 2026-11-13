@@ -23,11 +23,17 @@ def main(argv: list[str] | None = None) -> int:
     win = MainWindow(worker)
     win.show()
     if args.demo:
-        from .fakeradio import serve_fake
-        _, server = asyncio.run_coroutine_threadsafe(serve_fake(0), worker.loop).result(timeout=5)
+        from .fakeradio import serve_fake, serve_fake_panel
+
+        async def start():
+            radio, server = await serve_fake(0)
+            _, pserver = await serve_fake_panel(radio, 0)
+            return server, pserver
+
+        server, pserver = asyncio.run_coroutine_threadsafe(start(), worker.loop).result(timeout=5)
         port = server.sockets[0].getsockname()[1]
         win.addr.setEditText("127.0.0.1:%d" % port)
-        win.connect_to("ws://127.0.0.1:%d/" % port)
+        win.connect_to("ws://127.0.0.1:%d/" % port, "ws://127.0.0.1:%d/" % pserver.sockets[0].getsockname()[1])
     elif args.address:
         win.addr.setEditText(args.address)
         win.toggle_connection()

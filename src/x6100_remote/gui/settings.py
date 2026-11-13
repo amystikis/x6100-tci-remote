@@ -6,6 +6,7 @@ import json
 from PySide6.QtCore import QSettings
 
 DEFAULT_PORT = 50001
+PANEL_PORT = 50002
 
 
 def qsettings() -> QSettings:
@@ -19,6 +20,13 @@ def parse_target(text: str) -> str:
         return t if t.endswith("/") or "/" in t.split("://", 1)[1] else t + "/"
     host, sep, port = t.partition(":")
     return "ws://%s:%s/" % (host, port if sep and port.isdigit() else DEFAULT_PORT)
+
+
+def panel_url_for(tci_url: str, port: int = PANEL_PORT) -> str:
+    """The spectrum (panel) server runs on the same host as TCI: ws://host:50001/ -> ws://host:50002/."""
+    scheme, _, rest = tci_url.partition("://")
+    host = rest.split("/", 1)[0].rsplit(":", 1)[0] if ":" in rest.split("/", 1)[0] else rest.split("/", 1)[0]
+    return "%s://%s:%d/" % (scheme, host, port)
 
 
 def load_radios() -> list[str]:
@@ -43,3 +51,11 @@ def load_band_memory() -> dict:
 
 def save_band_memory(mem: dict) -> None:
     qsettings().setValue("band_memory", json.dumps(mem))
+
+
+def load_show_spectrum() -> bool:
+    return str(qsettings().value("show_spectrum", "true")).lower() != "false"
+
+
+def save_show_spectrum(on: bool) -> None:
+    qsettings().setValue("show_spectrum", "true" if on else "false")

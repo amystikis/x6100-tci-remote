@@ -11,8 +11,9 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDockWidget, QFrame, QGridL
 
 from .. import __version__
 from .audio import AVAILABLE as AUDIO_OK, MicSource, RxAudio
-from .settings import (load_band_memory, load_radios, parse_target, remember_radio,
-                       save_band_memory)
+from .settings import (load_band_memory, load_radios, load_show_spectrum, panel_url_for,
+                       parse_target, remember_radio, save_band_memory, save_show_spectrum)
+from .spectrum_view import SpectrumView
 from .widgets import FrequencyDisplay, SMeter
 from .worker import TciWorker
 
@@ -77,6 +78,7 @@ class MainWindow(QMainWindow):
         self._tx_since = 0.0
         self._mode_buttons: dict[str, QPushButton] = {}
         self._ptt_on = False
+        self._panel_url: str | None = None
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -117,6 +119,10 @@ class MainWindow(QMainWindow):
         info.addWidget(_btn("◀ −", slot=lambda: self.tune_by(-self.step.currentData())))
         info.addWidget(_btn("+ ▶", slot=lambda: self.tune_by(self.step.currentData())))
         v.addLayout(info)
+        self.spectrum = SpectrumView()
+        self.spectrum.tune_to.connect(self.tune_to)
+        self.spectrum.step.connect(lambda d: self.tune_by(d * self.step.currentData()))
+        v.addWidget(self.spectrum, 1)
         self.smeter = SMeter()
         v.addWidget(self.smeter)
 
@@ -228,9 +234,15 @@ class MainWindow(QMainWindow):
         self.dock.hide()
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock)
         m = self.menuBar().addMenu("&View")
+        self.spectrum_act = QAction("Spectrum && waterfall", self)
+        self.spectrum_act.setCheckable(True)
+        self.spectrum_act.setChecked(load_show_spectrum())
+        self.spectrum_act.toggled.connect(self.toggle_spectrum)
+        m.addAction(self.spectrum_act)
         act = self.dock.toggleViewAction()
         act.setText("Protocol log")
         m.addAction(act)
+        self.spectrum.setVisible(self.spectrum_act.isChecked())
         h = self.menuBar().addMenu("&Help")
         about = QAction("About", self)
         about.triggered.connect(lambda: self.statusBar().showMessage(
@@ -247,8 +259,10 @@ class MainWindow(QMainWindow):
         self.w.status.connect(self.on_status)
         self.w.changed.connect(self.refresh)
         self.w.audio.connect(self.rx.push)
+        self.w.spectrum.connect(self.spectrum.push)
+        self.w.panel_status.connect(self.on_panel_status)
         self.w.raw.connect(lambda s: self.log.appendPlainText(s) if self.dock.isVisible() else None)
-        self.resize(760, 860)
+        self.resize(760, 1040)
 
     # state -> widgets ----------------------------------------------------------------
     @property
@@ -277,6 +291,7 @@ class MainWindow(QMainWindow):
             self._build_filters()
             bw = abs(st.filter_hi - st.filter_lo)
             self.filter_lbl.setText("%d…%d Hz  (%.1f kHz)" % (st.filter_lo, st.filter_hi, bw / 1000))
+            self.spectrum.set_passband(st.filter_lo, st.filter_hi)
         if what in ("", "agc"):
             self.agc.setCurrentText(st.agc)
         if what in ("", "rit_enable", "rit_offset"):
@@ -356,6 +371,19 @@ class MainWindow(QMainWindow):
         self.freq.set_freq(new)
         self.w.send("vfo", 0, 0, new)
         self.target_timer.start(700)
+
+    def tune_to(self, hz: int) -> None:
+        """Tune to an absolute frequency (clicked in the spectrum)."""
+        base = self._freq_target if self._freq_target is not None else self.state.freq
+        self.tune_by(hz - base)
+
+    def toggle_spectrum(self, on: bool) -> None:
+        save_show_spectrum(on)
+        self.spectrum.setVisible(on)
+        if not on:
+            self.w.disconnect_panel()
+        elif self._panel_url and self.connect_btn.text() == "Disconnect":
+            self.w.connect_panel(self._panel_url)
 
     def _clear_target(self) -> None:
         self._freq_target = None
@@ -470,9 +498,22 @@ class MainWindow(QMainWindow):
         remember_radio(text)
         self.connect_to(parse_target(text))
 
-    def connect_to(self, url: str) -> None:
+    def connect_to(self, url: str, panel_url: str | None = None) -> None:
         self.connect_btn.setText("Disconnect")
+        self._panel_url = panel_url or panel_url_for(url)
         self.w.connect_to(url)
+        if self.spectrum_act.isChecked():
+            self.spectrum.clear()
+            self.spectrum.set_message("Waiting for spectrum...")
+            self.w.connect_panel(self._panel_url)
+
+    def on_panel_status(self, state: str, detail: str) -> None:
+        if state == "connected":
+            self.spectrum.set_message("Waiting for spectrum...")
+        elif state == "connecting":
+            self.spectrum.set_message("Connecting to the spectrum feed...")
+        else:
+            self.spectrum.set_message(("No spectrum - " + detail).strip(" -") if detail else "No spectrum")
 
     def on_status(self, state: str, detail: str) -> None:
         colors = {"connected": "#3ddc97", "connecting": "#f0a830", "disconnected": "#ff8a8a"}

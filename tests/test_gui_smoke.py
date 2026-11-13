@@ -108,3 +108,18 @@ def test_closing_the_window_unkeys(env):
     while radio.trx and time.time() < deadline:
         time.sleep(0.02)
     assert not radio.trx
+
+
+def test_spectrum_flows_into_view_and_click_tunes(env):
+    from x6100_remote.fakeradio import serve_fake_panel
+    win, radio, pump = env
+    panel, pserver = asyncio.run_coroutine_threadsafe(serve_fake_panel(radio, 0), win.w.loop).result(5)
+    win.w.connect_panel("ws://127.0.0.1:%d/" % pserver.sockets[0].getsockname()[1])
+    pump(lambda: win.spectrum.frames >= 3)
+    f = win.spectrum._frame
+    assert f.center_hz == 7151000 and win.spectrum._passband == (win.state.filter_lo, win.state.filter_hi)
+    win.spectrum.tune_to.emit(7_152_340)
+    pump(lambda: win.state.freq == 7_152_340)
+    pump(lambda: win.spectrum._frame.center_hz == 7_152_340)               # spectrum re-centres
+    win.w.disconnect_panel()
+    asyncio.run_coroutine_threadsafe(asyncio.sleep(0.05), win.w.loop).result(2)

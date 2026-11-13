@@ -1,0 +1,121 @@
+"""Spectrum feed of the OpenX6X00 panel server (WebSocket port 50002, the same server as the screen mirror).
+
+Observed on a real radio (firmware v0.3.9):
+
+* The server sends text lines on connect (``hello ...``, ``size 800 480``, ``role view 0 -``, ...) and then
+  ``m <dBm>`` S-meter lines. Those are ignored here.
+* ``screen 0`` stops the ~55 kB JPEG screen frames, ``panel 1`` starts the spectrum frames.
+* A spectrum frame is a binary message of 16 + 1024 bytes (little endian)::
+
+      u16 magic = 0xFFFF | u16 nbins = 1024 | u32 centre Hz | u32 span Hz | u32 frame counter | nbins x u8
+
+  The centre is the VFO frequency and the span was 100 kHz. Bin values are unsigned bytes of an
+  *uncalibrated* level scale (the radio's own web page auto-scales them), so the GUI does the same.
+
+The same socket also accepts radio key presses (role ``view`` appears to be read-only, but this client
+never tries). It therefore sends only the commands listed in :data:`ALLOWED_COMMANDS`.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import struct
+from dataclasses import dataclass
+from typing import Callable, Optional
+
+import numpy as np
+import websockets
+
+log = logging.getLogger(__name__)
+
+PANEL_PORT = 50002
+MAGIC = 0xFFFF
+_HEADER = struct.Struct("<HHIII")
+HEADER_SIZE = _HEADER.size            # 16
+ALLOWED_COMMANDS = ("screen 0", "panel 1", "ping 1")
+
+
+@dataclass
+class SpectrumFrame:
+    center_hz: int
+    span_hz: int
+    seq: int
+    bins: np.ndarray                  # uint8, length nbins, low frequency first
+
+    @property
+    def hz_per_bin(self) -> float:
+        return self.span_hz / max(1, len(self.bins))
+
+    def freq_at(self, index: float) -> float:
+        """Frequency of a (fractional) bin index."""
+        return self.center_hz - self.span_hz / 2 + index * self.hz_per_bin
+
+
+def parse_frame(data: bytes) -> Optional[SpectrumFrame]:
+    """Return the frame, or ``None`` if ``data`` is not a spectrum frame (e.g. a JPEG screen frame)."""
+    if len(data) < HEADER_SIZE:
+        return None
+    magic, nbins, center, span, seq = _HEADER.unpack_from(data, 0)
+    if magic != MAGIC or nbins == 0 or len(data) != HEADER_SIZE + nbins or span == 0:
+        return None
+    bins = np.frombuffer(data, dtype=np.uint8, count=nbins, offset=HEADER_SIZE)
+    return SpectrumFrame(center, span, seq, bins)
+
+
+def pack_frame(center_hz: int, span_hz: int, seq: int, bins: np.ndarray) -> bytes:
+    """Build a frame (used by the fake radio and tests)."""
+    b = np.asarray(bins, dtype=np.uint8)
+    return _HEADER.pack(MAGIC, len(b), center_hz, span_hz, seq) + b.tobytes()
+
+
+class PanelClient:
+    """Connect once with :meth:`run`; it returns when the socket closes.
+
+    Callbacks run on the event loop thread: ``on_open()`` after subscribing, ``on_frame(frame)`` for
+    every spectrum frame.
+    """
+
+    def __init__(self, url: str, keepalive: float = 15.0) -> None:
+        self.url = url
+        self.keepalive = keepalive
+        self.on_open: Optional[Callable[[], None]] = None
+        self.on_frame: Optional[Callable[[SpectrumFrame], None]] = None
+        self.frames = 0
+        self._ws = None
+
+    async def _send(self, text: str) -> None:
+        if text not in ALLOWED_COMMANDS:
+            raise ValueError("refusing to send %r to the panel server" % text)
+        if self._ws is not None:
+            await self._ws.send(text)
+
+    async def _keepalive(self) -> None:
+        while True:
+            await asyncio.sleep(self.keepalive)
+            await self._send("ping 1")
+
+    async def run(self) -> None:
+        async with websockets.connect(self.url, max_size=None, open_timeout=6,
+                                      ping_interval=20, ping_timeout=20) as ws:
+            self._ws = ws
+            await self._send("screen 0")          # we do not want the JPEG screen mirror
+            await self._send("panel 1")           # start the spectrum frames
+            if self.on_open:
+                self.on_open()
+            ka = asyncio.ensure_future(self._keepalive())
+            try:
+                async for msg in ws:
+                    if isinstance(msg, str):
+                        continue
+                    frame = parse_frame(msg)
+                    if frame is not None:
+                        self.frames += 1
+                        if self.on_frame:
+                            self.on_frame(frame)
+            finally:
+                ka.cancel()
+                self._ws = None
+
+    async def close(self) -> None:
+        if self._ws is not None:
+            await self._ws.close()

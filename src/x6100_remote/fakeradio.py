@@ -15,6 +15,7 @@ import random
 import numpy as np
 from websockets.asyncio.server import serve
 
+from .spectrum import pack_frame
 from .tci.protocol import format_command, parse_commands
 from .tci.stream import (FORMAT_FLOAT32, STREAM_RX_AUDIO, STREAM_TX_AUDIO, STREAM_TX_CHRONO,
                          StreamHeader, decode_stream)
@@ -160,16 +161,89 @@ async def serve_fake(port: int = 50001, listen_only: bool = False, host: str = "
     return radio, server
 
 
+class FakePanel:
+    """Fake of the radio's panel server (port 50002): hello lines, ``m`` S-meter lines and, after
+    ``panel 1``, spectrum frames centred on the fake radio's VFO. ``screen 1`` sends junk 'JPEG' frames."""
+
+    SPAN = 100_000
+    NBINS = 1024
+    FPS = 14
+
+    def __init__(self, radio: FakeRadio) -> None:
+        self.radio = radio
+        self.log: list[str] = []          # every text command received (for tests)
+        self.seq = 0
+
+    def spectrum_bins(self, center: int) -> np.ndarray:
+        rng = np.random.default_rng()
+        bins = 142 + rng.normal(0, 3, self.NBINS)
+        hz_per_bin = self.SPAN / self.NBINS
+        # a few carriers at fixed absolute frequencies, so they move when the fake VFO is retuned
+        for f, level, width in ((7_146_500, 30, 14), (7_153_200, 22, 10), (7_160_000, 38, 3), (7_141_000, 16, 25)):
+            idx = (f - (center - self.SPAN / 2)) / hz_per_bin
+            if -50 < idx < self.NBINS + 50:
+                x = np.arange(self.NBINS)
+                bins += level * np.exp(-((x - idx) / (width / 2.0)) ** 2) * (0.7 + 0.3 * rng.random())
+        return np.clip(bins, 0, 255).astype(np.uint8)
+
+    async def spectrum_loop(self, ws) -> None:
+        while True:
+            await asyncio.sleep(1 / self.FPS)
+            self.seq += 1
+            await ws.send(pack_frame(self.radio.vfo[0], self.SPAN, self.seq, self.spectrum_bins(self.radio.vfo[0])))
+
+    async def screen_loop(self, ws) -> None:
+        while True:
+            await asyncio.sleep(0.11)
+            await ws.send(bytes([32, 3, 224, 1, 0, 0, 0, 0, 255, 216]) + bytes(50_000))
+
+    async def handler(self, ws) -> None:
+        loops: dict[str, asyncio.Future] = {}
+
+        def toggle(name: str, on: bool, make) -> None:
+            if on and name not in loops:
+                loops[name] = asyncio.ensure_future(make(ws))
+            elif not on and name in loops:
+                loops.pop(name).cancel()
+
+        try:
+            for line in ("hello OpenX6X00 - fake", "size 800 480", "role view 0 -", "ctl none 0"):
+                await ws.send(line)
+            async for msg in ws:
+                if not isinstance(msg, str):
+                    continue
+                self.log.append(msg)
+                if msg.startswith("panel "):
+                    toggle("panel", msg.split()[1] == "1", self.spectrum_loop)
+                elif msg.startswith("screen "):
+                    toggle("screen", msg.split()[1] == "1", self.screen_loop)
+        except Exception:
+            pass
+        finally:
+            for t in loops.values():
+                t.cancel()
+
+
+async def serve_fake_panel(radio: FakeRadio, port: int = 50002, host: str = "127.0.0.1"):
+    panel = FakePanel(radio)
+    server = await serve(panel.handler, host, port, max_size=None)
+    return panel, server
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--port", type=int, default=50001)
     ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--panel-port", type=int, default=50002, help="spectrum server port (-1 to disable)")
     ap.add_argument("--listen-only", action="store_true")
     a = ap.parse_args()
 
     async def run():
         radio, server = await serve_fake(a.port, a.listen_only, a.host)
         print("fake TCI radio on ws://%s:%d/ (%s)" % (a.host, a.port, "listen-only" if a.listen_only else "operate"))
+        if a.panel_port >= 0:
+            await serve_fake_panel(radio, a.panel_port, a.host)
+            print("fake panel (spectrum) on ws://%s:%d/" % (a.host, a.panel_port))
         await server.serve_forever()
 
     try:

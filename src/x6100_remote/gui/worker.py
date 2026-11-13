@@ -7,6 +7,7 @@ from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, Signal
 
+from ..spectrum import PanelClient
 from ..tci import Command, RadioState, TciClient
 
 
@@ -15,6 +16,8 @@ class TciWorker(QObject):
     changed = Signal(str)           # name of the RadioState field that changed
     audio = Signal(bytes, int)      # float32 interleaved stereo, sample rate
     raw = Signal(str)               # every text command, for the protocol log
+    spectrum = Signal(object)       # SpectrumFrame from the panel server
+    panel_status = Signal(str, str)  # same states as `status`, for the spectrum feed
 
     def __init__(self) -> None:
         super().__init__()
@@ -28,6 +31,8 @@ class TciWorker(QObject):
         self._announced = False
         self._tx_source: Optional[Callable] = None
         self._audio_on = False
+        self._panel_task: Optional[asyncio.Task] = None
+        self._panel_want = False
 
     def _run_loop(self) -> None:
         asyncio.set_event_loop(self.loop)
@@ -42,6 +47,7 @@ class TciWorker(QObject):
 
     def disconnect_from(self) -> None:
         self.submit(self._disconnect())
+        self.disconnect_panel()
 
     async def _connect(self, url: str) -> None:
         await self._disconnect()
@@ -97,6 +103,45 @@ class TciWorker(QObject):
         if changed:
             self.changed.emit(changed)
 
+    # spectrum feed (panel server) -----------------------------------------------------------
+    def connect_panel(self, url: str) -> None:
+        self.submit(self._connect_panel(url))
+
+    def disconnect_panel(self) -> None:
+        self.submit(self._disconnect_panel())
+
+    async def _connect_panel(self, url: str) -> None:
+        await self._disconnect_panel()
+        self._panel_want = True
+        self._panel_task = self.loop.create_task(self._panel_session(url))
+
+    async def _disconnect_panel(self) -> None:
+        self._panel_want = False
+        if self._panel_task is not None:
+            self._panel_task.cancel()
+            self._panel_task = None
+        self.panel_status.emit("disconnected", "")
+
+    async def _panel_session(self, url: str) -> None:
+        backoff = 1
+        while self._panel_want:
+            self.panel_status.emit("connecting", url)
+            c = PanelClient(url)
+            c.on_open = lambda: self.panel_status.emit("connected", "")
+            c.on_frame = self.spectrum.emit
+            reason = "connection closed"
+            try:
+                await c.run()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                reason = str(e) or e.__class__.__name__
+            if not self._panel_want:
+                break
+            self.panel_status.emit("disconnected", "%s - retrying in %ds" % (reason, backoff))
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 10)
+
     # commands ----------------------------------------------------------------------
     def send(self, name: str, *args: object) -> None:
         self.submit(self._send(name, args))
@@ -121,7 +166,11 @@ class TciWorker(QObject):
             self.client.tx_source = fn
 
     def shutdown(self) -> None:
-        fut = asyncio.run_coroutine_threadsafe(self._disconnect(), self.loop)
+        async def stop_all():
+            await self._disconnect_panel()
+            await self._disconnect()
+
+        fut = asyncio.run_coroutine_threadsafe(stop_all(), self.loop)
         try:
             fut.result(timeout=2)
         except Exception:

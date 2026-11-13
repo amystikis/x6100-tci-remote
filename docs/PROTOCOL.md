@@ -25,3 +25,19 @@ reserved. Types: 0 IQ, 1 RX audio, 2 TX audio, 3 TX chrono. Observed audio: 48 k
 per frame. For TX the radio sends TX_CHRONO frames; the client answers with TX_AUDIO of the same sample count.
 
 S9 = -73 dBm, 6 dB per S-unit.
+
+## Panel server (port 50002): spectrum
+
+Same server as the screen mirror. On connect it sends text lines (`hello OpenX6X00 - v0.3.9 ...`, `size 800 480`,
+`keys ...`, `role view 0 -`, `ctl none 0`, then JSON lines such as `spots`, `bands`, `state`, `ft8`) and `m <dBm>` S-meter
+lines. The web page sends `auth <token>`, `screen 1`, `panel 1`, `ping 1`. This app sends only `screen 0`, `panel 1`, `ping 1`
+and no token (the `view` role needs none).
+
+Spectrum frame, binary, little endian, 16 + 1024 bytes, about 14 per second:
+
+    u16 0xFFFF | u16 nbins (1024) | u32 centre Hz (= VFO) | u32 span Hz (100000 observed) | u32 counter | nbins x u8
+
+Bin values are an uncalibrated level scale (typically 128-175 on a quiet band); the viewer auto-scales. The screen frames
+(`screen 1`) are an 8-byte header (`u16 800, u16 480, u32 counter`) followed by a JPEG.
+
+IQ is **not** offered over TCI: `iq_start` at 96 kHz produced no binary frames.
