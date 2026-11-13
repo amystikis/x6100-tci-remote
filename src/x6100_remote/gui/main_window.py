@@ -15,8 +15,8 @@ from ..cwtuner import target_hz
 from ..ipc import CommandServer
 from .audio import AVAILABLE as AUDIO_OK, MicSource, RxAudio
 from .settings import (load_band_memory, load_flag, load_panel_token, load_radios, load_show_spectrum,
-                       panel_url_for, parse_target, remember_radio, save_band_memory,
-                       save_flag, save_panel_token, save_show_spectrum)
+                       load_window_geometry, panel_url_for, parse_target, remember_radio, save_band_memory,
+                       save_flag, save_panel_token, save_show_spectrum, save_window_geometry)
 from .spectrum_view import SpectrumView
 from .widgets import FrequencyDisplay, SMeter
 from .worker import TciWorker
@@ -90,6 +90,8 @@ class MainWindow(QMainWindow):
         root = QWidget()
         self.setCentralWidget(root)
         v = QVBoxLayout(root)
+        v.setContentsMargins(8, 6, 8, 6)
+        v.setSpacing(4)
 
         # connection bar ------------------------------------------------------
         bar = QHBoxLayout()
@@ -137,6 +139,7 @@ class MainWindow(QMainWindow):
         v.addWidget(self.spectrum, 1)
         self.cw_box = QGroupBox("CW decoder (decoded by the radio)")
         cwl = QHBoxLayout(self.cw_box)
+        cwl.setContentsMargins(8, 2, 8, 4)
         self.cw_view = QPlainTextEdit()
         self.cw_view.setReadOnly(True)
         self.cw_view.setFixedHeight(54)          # 2 lines
@@ -152,6 +155,8 @@ class MainWindow(QMainWindow):
         # bands / modes -----------------------------------------------------------
         bands = self.band_box = QGroupBox("Band")
         bl = QHBoxLayout(bands)
+        bl.setContentsMargins(8, 2, 8, 4)
+        bl.setSpacing(3)
         self._band_buttons: dict[str, QPushButton] = {}
         for name, *_ in BANDS:
             b = _btn(name + "m", True)
@@ -161,11 +166,15 @@ class MainWindow(QMainWindow):
         v.addWidget(bands)
         self.modes_box = QGroupBox("Mode")
         self.modes_l = QHBoxLayout(self.modes_box)
+        self.modes_l.setContentsMargins(8, 2, 8, 4)
+        self.modes_l.setSpacing(3)
         v.addWidget(self.modes_box)
 
         # filter / agc / rit -------------------------------------------------------
         rx = self.rx_box = QGroupBox("Receiver")
         g = QGridLayout(rx)
+        g.setContentsMargins(8, 2, 8, 4)
+        g.setVerticalSpacing(4)
         self.filter_l = QHBoxLayout()
         g.addWidget(QLabel("Filter"), 0, 0)
         g.addLayout(self.filter_l, 0, 1, 1, 5)
@@ -221,6 +230,7 @@ class MainWindow(QMainWindow):
         # audio -------------------------------------------------------------------
         au = self.audio_box = QGroupBox("Audio")
         al = QHBoxLayout(au)
+        al.setContentsMargins(8, 2, 8, 4)
         self.sound = _btn("Sound", True, self.toggle_sound)
         self.sound.setEnabled(AUDIO_OK)
         if not AUDIO_OK:
@@ -240,6 +250,8 @@ class MainWindow(QMainWindow):
         self.tx_box = QFrame()
         self.tx_box.setObjectName("tx_group")
         tl = QGridLayout(self.tx_box)
+        tl.setContentsMargins(8, 6, 8, 6)
+        tl.setVerticalSpacing(4)
         self.tx_enable = QCheckBox("Enable transmit controls (you are responsible for what goes on air)")
         self.tx_enable.toggled.connect(self.tx_enable_changed)
         tl.addWidget(self.tx_enable, 0, 0, 1, 4)
@@ -346,7 +358,14 @@ class MainWindow(QMainWindow):
         self.w.panel_paired.connect(self.on_paired)
         self.w.raw.connect(lambda s: self.log.appendPlainText(s) if self.dock.isVisible() else None)
         self._update_key_buttons()
-        self.resize(760, 1040)
+        geometry = load_window_geometry()
+        if geometry is not None:
+            self.restoreGeometry(geometry)
+        else:
+            avail = self.screen().availableGeometry() if self.screen() else None
+            h = min(900, avail.height() - 60) if avail else 900
+            w = min(1060, avail.width() - 60) if avail else 1060
+            self.resize(w, h)
 
     # state -> widgets ----------------------------------------------------------------
     @property
@@ -610,6 +629,7 @@ class MainWindow(QMainWindow):
         self.set_ptt(False)
         if self.cmd_server is not None:
             self.cmd_server.stop()
+        save_window_geometry(bytes(self.saveGeometry()))
         save_band_memory(self.band_mem)
         self.rx.stop()
         self.mic.stop()

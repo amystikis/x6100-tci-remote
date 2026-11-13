@@ -82,6 +82,15 @@ def save_panel_token(url: str, token: str) -> None:
     qsettings().setValue("panel_tokens", json.dumps(tokens))
 
 
+def load_window_geometry() -> bytes | None:
+    v = qsettings().value("window_geometry")
+    return bytes(v) if v else None
+
+
+def save_window_geometry(geometry: bytes) -> None:
+    qsettings().setValue("window_geometry", geometry)
+
+
 def load_flag(name: str, default: bool = True) -> bool:
     v = qsettings().value("flag_" + name)
     return default if v is None else str(v).lower() != "false"

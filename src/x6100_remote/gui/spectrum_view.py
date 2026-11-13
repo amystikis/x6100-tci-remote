@@ -60,7 +60,7 @@ class SpectrumView(QWidget):
 
     def __init__(self, rows: int = 240) -> None:
         super().__init__()
-        self.setMinimumSize(320, 220)
+        self.setMinimumSize(320, 160)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.CrossCursor)
