@@ -13,13 +13,17 @@ Observed on a real radio (firmware v0.3.9):
   The centre is the VFO frequency and the span was 100 kHz. Bin values are unsigned bytes of an
   *uncalibrated* level scale (the radio's own web page auto-scales them), so the GUI does the same.
 
-The same socket also accepts radio key presses (role ``view`` appears to be read-only, but this client
-never tries). It therefore sends only the commands listed in :data:`ALLOWED_COMMANDS`.
+The same socket also accepts radio key presses and device pairing (``pair <6-digit code> <name>`` answers
+``paired <role> ...``; a paired device authenticates with ``auth <key>`` and then has the role ``operate`` or
+``admin``). This client sends only what :func:`is_allowed` accepts: the three subscription commands, pairing and
+auth, ``control take|release``, and presses of the few keys in :data:`KEY_NAMES`. It never sends POWER, PTT or any
+other key, and it presses keys only when the radio reports an operate/admin role.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import struct
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -35,7 +39,20 @@ PANEL_PORT = 50002
 MAGIC = 0xFFFF
 _HEADER = struct.Struct("<HHIII")
 HEADER_SIZE = _HEADER.size            # 16
-ALLOWED_COMMANDS = ("screen 0", "panel 1", "ping 1")
+ALLOWED_COMMANDS = ("screen 0", "panel 1", "ping 1", "control take", "control release")
+KEY_NAMES = ("PRE", "AB", "VM", "FST", "ATU")          # the only radio keys this app will ever press
+_ALLOWED_RE = (re.compile(r"key (%s) [01]" % "|".join(KEY_NAMES)),
+               re.compile(r"auth [0-9a-fA-F]{16,128}"),
+               re.compile(r"pair \d{6} [A-Za-z0-9 ._-]{1,32}"))
+_TOKEN_RE = re.compile(r"[0-9a-fA-F]{16,128}")
+
+
+def is_allowed(text: str) -> bool:
+    return text in ALLOWED_COMMANDS or any(r.fullmatch(text) for r in _ALLOWED_RE)
+
+
+class ControlDenied(RuntimeError):
+    """The radio does not let this app operate it (not paired, or not allowed)."""
 
 
 @dataclass
@@ -78,9 +95,12 @@ class PanelClient:
     every spectrum frame.
     """
 
-    def __init__(self, url: str, keepalive: float = 15.0, info: Optional[PanelInfo] = None) -> None:
+    def __init__(self, url: str, keepalive: float = 15.0, info: Optional[PanelInfo] = None,
+                 token: Optional[str] = None) -> None:
         self.url = url
         self.keepalive = keepalive
+        self.token = token if token and _TOKEN_RE.fullmatch(token) else None
+        self.on_paired: Optional[Callable[[str, Optional[str]], None]] = None   # (role, key or None)
         self.info = info if info is not None else PanelInfo()
         self.on_info: Optional[Callable[[str], None]] = None      # called with "spots", "bands", "cw", ...
         self.on_open: Optional[Callable[[], None]] = None
@@ -89,7 +109,7 @@ class PanelClient:
         self._ws = None
 
     async def _send(self, text: str) -> None:
-        if text not in ALLOWED_COMMANDS:
+        if not is_allowed(text):
             raise ValueError("refusing to send %r to the panel server" % text)
         if self._ws is not None:
             await self._ws.send(text)
@@ -103,6 +123,8 @@ class PanelClient:
         async with websockets.connect(self.url, max_size=None, open_timeout=6,
                                       ping_interval=20, ping_timeout=20) as ws:
             self._ws = ws
+            if self.token:
+                await self._send("auth " + self.token)
             await self._send("screen 0")          # we do not want the JPEG screen mirror
             await self._send("panel 1")           # start the spectrum frames
             if self.on_open:
@@ -111,6 +133,13 @@ class PanelClient:
             try:
                 async for msg in ws:
                     if isinstance(msg, str):
+                        if msg.startswith("paired "):
+                            words = msg.split()
+                            key = next((w for w in words[2:] if _TOKEN_RE.fullmatch(w)), None)
+                            self.info.role = words[1] if len(words) > 1 else self.info.role
+                            if self.on_paired:
+                                self.on_paired(self.info.role, key)
+                            continue
                         kind = self.info.apply(msg)
                         if kind and self.on_info:
                             self.on_info(kind)
@@ -123,6 +152,26 @@ class PanelClient:
             finally:
                 ka.cancel()
                 self._ws = None
+
+    async def pair(self, code: str, name: str) -> None:
+        """Ask the radio to pair this app. The reply arrives via ``on_paired``."""
+        await self._send("pair %s %s" % (code, name))
+
+    async def press(self, key: str, hold: float = 0.12) -> None:
+        """Press and release one of :data:`KEY_NAMES` on the radio. Needs an operate/admin role."""
+        if key not in KEY_NAMES:
+            raise ValueError("key %r is not allowed" % key)
+        if self.info.role not in ("operate", "admin"):
+            raise ControlDenied("This app is not paired with the radio, so it may only watch. Use Pair...")
+        await self._send("control take")
+        await asyncio.sleep(0.2)
+        try:
+            await self._send("key %s 1" % key)
+            await asyncio.sleep(hold)
+        finally:
+            await self._send("key %s 0" % key)
+            await asyncio.sleep(0.1)
+            await self._send("control release")
 
     async def close(self) -> None:
         if self._ws is not None:

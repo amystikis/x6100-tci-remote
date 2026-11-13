@@ -179,10 +179,15 @@ class FakePanel:
              {"f": 7_158_000, "c": "K1TTT", "m": "SSB", "a": 5, "s": "N2AB", "k": "SOTA W1/HA-001", "al": 1},
              {"f": 7_043_000, "c": "EA8ZZ", "m": "FT8", "a": 1, "s": "EA4A", "k": "", "al": 0}]
 
+    PAIR_CODE = "123456"
+    TOKEN = "0123456789abcdef0123456789abcdef"
+
     def __init__(self, radio: FakeRadio) -> None:
         self.radio = radio
         self.log: list[str] = []          # every text command received (for tests)
+        self.keys_pressed: list[str] = []  # keys honoured while paired and holding control
         self.seq = 0
+        self.pre, self.atu, self.vfo_b = 1, 1, 0
 
     def spectrum_bins(self, center: int) -> np.ndarray:
         rng = np.random.default_rng()
@@ -202,13 +207,16 @@ class FakePanel:
             self.seq += 1
             await ws.send(pack_frame(self.radio.vfo[0], self.SPAN, self.seq, self.spectrum_bins(self.radio.vfo[0])))
 
+    def state_line(self) -> str:
+        return "state " + json.dumps({"freq": self.radio.vfo[0], "mode": 0, "flo": 50, "fhi": 3050, "pre": self.pre,
+                                      "att": 0, "nb": 0, "nr": 1, "sql": 0, "rfg": 70, "vol": 20, "pwr": 5.0,
+                                      "step": 500, "zoom": 4, "vfo": self.vfo_b, "atu": self.atu, "bat": 76,
+                                      "tx": 0, "lock": 0}, separators=(",", ":"))
+
     def info_lines(self) -> list[str]:
         return ["bands " + json.dumps(self.BANDS, separators=(",", ":")),
                 "plan " + json.dumps(self.PLAN, separators=(",", ":")),
-                "state " + json.dumps({"freq": self.radio.vfo[0], "mode": 0, "flo": 50, "fhi": 3050, "pre": 1,
-                                       "att": 0, "nb": 0, "nr": 1, "sql": 0, "rfg": 70, "vol": 20, "pwr": 5.0,
-                                       "step": 500, "zoom": 4, "atu": 1, "bat": 76, "tx": 0, "lock": 0},
-                                      separators=(",", ":")),
+                self.state_line(),
                 "ft8 " + json.dumps({"open": 1, "tx": 0, "next": "", "logged": ""}, separators=(",", ":")),
                 "cw " + json.dumps("CQ CQ DE "),
                 "spots " + json.dumps(self.SPOTS, separators=(",", ":"))]
@@ -221,6 +229,33 @@ class FakePanel:
             await ws.send("spots " + json.dumps(self.SPOTS, separators=(",", ":")))
             await ws.send("cw " + json.dumps("K1TTT %d " % n))
 
+    async def handle_control(self, ws, msg: str, sess: dict) -> None:
+        """Auth, pairing, control and key presses, like the real radio's panel server (format inferred)."""
+        parts = msg.split()
+        if msg.startswith("auth ") and parts[1] == self.TOKEN:
+            sess["role"] = "operate"
+            await ws.send("role operate 1 tester")
+        elif msg.startswith("pair ") and len(parts) >= 3 and parts[1] == self.PAIR_CODE:
+            sess["role"] = "operate"
+            await ws.send("paired operate " + self.TOKEN)
+            await ws.send("role operate 1 " + " ".join(parts[2:]))
+        elif msg == "control take" and sess["role"] == "operate":
+            sess["control"] = True
+            await ws.send("ctl me 1")
+        elif msg == "control release":
+            sess["control"] = False
+            await ws.send("ctl none 0")
+        elif msg.startswith("key ") and len(parts) == 3 and parts[2] == "1":
+            if sess["role"] == "operate" and sess["control"]:
+                self.keys_pressed.append(parts[1])
+                if parts[1] == "PRE":
+                    self.pre = (self.pre + 1) % 3
+                elif parts[1] == "ATU":
+                    self.atu ^= 1
+                elif parts[1] == "AB":
+                    self.vfo_b ^= 1
+                await ws.send(self.state_line())
+
     async def screen_loop(self, ws) -> None:
         while True:
             await asyncio.sleep(0.11)
@@ -228,6 +263,7 @@ class FakePanel:
 
     async def handler(self, ws) -> None:
         loops: dict[str, asyncio.Future] = {}
+        sess = {"role": "view", "control": False}
 
         def toggle(name: str, on: bool, make) -> None:
             if on and name not in loops:
@@ -243,6 +279,7 @@ class FakePanel:
                 if not isinstance(msg, str):
                     continue
                 self.log.append(msg)
+                await self.handle_control(ws, msg, sess)
                 if msg.startswith("panel "):
                     toggle("panel", msg.split()[1] == "1", self.spectrum_loop)
                 elif msg.startswith("screen "):

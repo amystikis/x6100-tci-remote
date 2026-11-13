@@ -59,3 +59,24 @@ def load_show_spectrum() -> bool:
 
 def save_show_spectrum(on: bool) -> None:
     qsettings().setValue("show_spectrum", "true" if on else "false")
+
+
+def _host_of(url: str) -> str:
+    return url.split("://", 1)[-1].split("/", 1)[0].rsplit(":", 1)[0]
+
+
+def load_panel_token(url: str) -> str:
+    """Pairing key for the radio's panel server (kept per radio, in this user's config only)."""
+    try:
+        return str(dict(json.loads(qsettings().value("panel_tokens", "{}"))).get(_host_of(url), ""))
+    except (ValueError, TypeError):
+        return ""
+
+
+def save_panel_token(url: str, token: str) -> None:
+    try:
+        tokens = dict(json.loads(qsettings().value("panel_tokens", "{}")))
+    except (ValueError, TypeError):
+        tokens = {}
+    tokens[_host_of(url)] = token
+    qsettings().setValue("panel_tokens", json.dumps(tokens))

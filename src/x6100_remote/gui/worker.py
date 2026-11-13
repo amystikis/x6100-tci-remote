@@ -8,7 +8,7 @@ from typing import Callable, Optional
 from PySide6.QtCore import QObject, Signal
 
 from ..panelinfo import PanelInfo
-from ..spectrum import PanelClient
+from ..spectrum import ControlDenied, PanelClient
 from ..tci import Command, RadioState, TciClient
 
 
@@ -20,6 +20,8 @@ class TciWorker(QObject):
     spectrum = Signal(object)       # SpectrumFrame from the panel server
     panel_info = Signal(str)        # "spots" | "bands" | "plan" | "state" | "cw" | "ft8" (data is in worker.info)
     panel_status = Signal(str, str)  # same states as `status`, for the spectrum feed
+    panel_notice = Signal(str)      # something to tell the user (key refused, pairing result, ...)
+    panel_paired = Signal(str, str)  # (role, key); key is "" if the radio's reply held none we recognise
 
     def __init__(self) -> None:
         super().__init__()
@@ -34,6 +36,9 @@ class TciWorker(QObject):
         self._tx_source: Optional[Callable] = None
         self._audio_on = False
         self.info = PanelInfo()
+        self._panel_token = ""
+        self._pressing = 0                                   # key presses in flight (must finish with key-up)
+        self._panel_client: Optional[PanelClient] = None
         self._panel_task: Optional[asyncio.Task] = None
         self._panel_want = False
 
@@ -110,6 +115,45 @@ class TciWorker(QObject):
     def connect_panel(self, url: str) -> None:
         self.submit(self._connect_panel(url))
 
+    def set_panel_token(self, token: str) -> None:
+        self._panel_token = token or ""
+
+    def press_key(self, key: str, hold: float = 0.12) -> None:
+        self.submit(self._press(key, hold))
+
+    def _notice(self, text: str) -> None:
+        try:
+            self.panel_notice.emit(text)
+        except RuntimeError:                                 # the window is already gone
+            pass
+
+    async def _press(self, key: str, hold: float) -> None:
+        c = self._panel_client
+        if c is None:
+            self._notice("The panel connection is not up yet.")
+            return
+        self._pressing += 1
+        try:
+            await c.press(key, hold)
+        except ControlDenied as e:
+            self._notice(str(e))
+        except Exception as e:
+            self._notice("Key %s failed: %s" % (key, e))
+        finally:
+            self._pressing -= 1
+
+    def pair_panel(self, code: str, name: str) -> None:
+        async def go():
+            c = self._panel_client
+            if c is None:
+                self.panel_notice.emit("The panel connection is not up yet.")
+                return
+            try:
+                await c.pair(code, name)
+            except Exception as e:
+                self.panel_notice.emit("Pairing failed: %s" % e)
+        self.submit(go())
+
     def disconnect_panel(self) -> None:
         self.submit(self._disconnect_panel())
 
@@ -130,8 +174,10 @@ class TciWorker(QObject):
         backoff = 1
         while self._panel_want:
             self.panel_status.emit("connecting", url)
-            c = PanelClient(url, info=self.info)
+            c = PanelClient(url, info=self.info, token=self._panel_token)
+            self._panel_client = c
             c.on_info = self.panel_info.emit
+            c.on_paired = lambda role, key: self.panel_paired.emit(role, key or "")
             c.on_open = lambda: self.panel_status.emit("connected", "")
             c.on_frame = self.spectrum.emit
             reason = "connection closed"
@@ -141,6 +187,7 @@ class TciWorker(QObject):
                 raise
             except Exception as e:
                 reason = str(e) or e.__class__.__name__
+            self._panel_client = None
             if not self._panel_want:
                 break
             self.panel_status.emit("disconnected", "%s - retrying in %ds" % (reason, backoff))
@@ -172,12 +219,16 @@ class TciWorker(QObject):
 
     def shutdown(self) -> None:
         async def stop_all():
+            for _ in range(40):                              # let a key press finish with its key-up (max 4 s)
+                if not self._pressing:
+                    break
+                await asyncio.sleep(0.1)
             await self._disconnect_panel()
             await self._disconnect()
 
         fut = asyncio.run_coroutine_threadsafe(stop_all(), self.loop)
         try:
-            fut.result(timeout=2)
+            fut.result(timeout=6)
         except Exception:
             pass
         self.loop.call_soon_threadsafe(self.loop.stop)

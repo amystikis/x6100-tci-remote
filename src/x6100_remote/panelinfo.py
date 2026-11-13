@@ -84,6 +84,10 @@ class PanelInfo:
     cw_text: str = ""
     volmax: int = 0
     pwrmax: int = 0
+    role: str = "view"            # "view" until this app is paired; then "operate" or "admin"
+    tx_allowed: bool = False      # the radio's per-device "may transmit" flag
+    role_name: str = ""
+    ctl_who: str = ""
 
     def apply(self, line: str) -> Optional[str]:
         """Update from one text line; return what changed (``"bands"``, ``"spots"``, ...) or None."""
@@ -105,6 +109,13 @@ class PanelInfo:
                 self.ft8 = dict(json.loads(payload))
             elif kind == "cw":
                 self.cw_text = merge_cw(self.cw_text, str(json.loads(payload)))
+            elif kind == "role":
+                parts = payload.split()
+                self.role = parts[0]
+                self.tx_allowed = len(parts) > 1 and parts[1] == "1"
+                self.role_name = " ".join(parts[2:]).replace("-", "", 1) if len(parts) > 2 else ""
+            elif kind == "ctl":
+                self.ctl_who = payload.split()[0] if payload.split() else ""
             elif kind == "volmax":
                 self.volmax = int(payload)
             elif kind == "pwrmax":

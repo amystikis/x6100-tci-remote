@@ -147,3 +147,33 @@ def test_panel_info_shows_in_window(env):
     assert win.spectrum.show_spots is False
     win.w.disconnect_panel()
     asyncio.run_coroutine_threadsafe(asyncio.sleep(0.05), win.w.loop).result(2)
+
+
+def test_key_buttons_need_pairing_and_atu_tune_needs_tx_enable(env):
+    from x6100_remote.fakeradio import serve_fake_panel
+    win, radio, pump = env
+    assert all(not b.isEnabled() for b in win._key_buttons.values())      # no panel connection yet
+    panel, pserver = asyncio.run_coroutine_threadsafe(serve_fake_panel(radio, 0), win.w.loop).result(5)
+    win.w.connect_panel("ws://127.0.0.1:%d/" % pserver.sockets[0].getsockname()[1])
+    pump(lambda: win._key_buttons["PRE"].isEnabled() and win.w.info.hello)
+    assert not win.pair_btn.isHidden() and not win.atu_tune.isEnabled()
+    win._key_buttons["PRE"].click()                                        # unpaired: refused, nothing sent
+    pump(lambda: "not paired" in win.statusBar().currentMessage())
+    assert not any(m.startswith(("key", "control")) for m in panel.log)
+    win.w.pair_panel("123456", "gui-test")                                 # what the Pair... dialog calls
+    pump(lambda: win.w.info.role == "operate" and win.pair_btn.isHidden())
+    pump(lambda: "Paired as operate" in win.statusBar().currentMessage())
+    pre_before = panel.pre
+    win._key_buttons["PRE"].click()
+    pump(lambda: panel.keys_pressed == ["PRE"])
+    pump(lambda: win.w.info.state.get("pre") == (pre_before + 1) % 3)
+    pump(lambda: panel.log[-1] == "control release")                       # press finished with key-up + release
+    assert panel.log[-3:-1] == ["key PRE 1", "key PRE 0"]
+    assert win._key_buttons["ATU"].property("on") is True                  # ATU shown on (fake state atu=1)
+    assert not win.atu_tune.isEnabled()                                    # transmit controls still off
+    win.tx_enable.setChecked(True)
+    pump(lambda: win.atu_tune.isEnabled())
+    win.tx_enable.setChecked(False)
+    pump(lambda: not win.atu_tune.isEnabled())
+    win.w.disconnect_panel()
+    asyncio.run_coroutine_threadsafe(asyncio.sleep(0.05), win.w.loop).result(2)

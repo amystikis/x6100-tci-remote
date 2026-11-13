@@ -1,6 +1,7 @@
 """Main window: connection bar, VFO, S-meter, mode/band/filter, audio and guarded TX controls."""
 from __future__ import annotations
 
+import platform
 import time
 
 from PySide6.QtCore import QEvent, Qt, QTimer
@@ -11,8 +12,9 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDockWidget, QFrame, QGridL
 
 from .. import __version__
 from .audio import AVAILABLE as AUDIO_OK, MicSource, RxAudio
-from .settings import (load_band_memory, load_radios, load_show_spectrum, panel_url_for,
-                       parse_target, remember_radio, save_band_memory, save_show_spectrum)
+from .settings import (load_band_memory, load_panel_token, load_radios, load_show_spectrum,
+                       panel_url_for, parse_target, remember_radio, save_band_memory,
+                       save_panel_token, save_show_spectrum)
 from .spectrum_view import SpectrumView
 from .widgets import FrequencyDisplay, SMeter
 from .worker import TciWorker
@@ -51,6 +53,7 @@ QFrame#tx_group { border:1px solid #5a2d2d; border-radius:8px; }
 QCheckBox::indicator { width:16px; height:16px; border:1px solid #3a4c6e; border-radius:4px; background:#0e1626; }
 QCheckBox::indicator:checked { background:#f0a830; border-color:#f0a830; }
 QCheckBox::indicator:disabled { border-color:#2a3350; background:#0b1220; }
+QPushButton[on="true"] { background:#1f3d33; border-color:#3ddc97; color:#bff5dc; }
 QSlider::groove:horizontal { height:6px; background:#22324f; border-radius:3px; }
 QSlider::handle:horizontal { background:#f0a830; width:14px; margin:-5px 0; border-radius:7px; }
 """
@@ -184,6 +187,31 @@ class MainWindow(QMainWindow):
         g.addWidget(self.rit_off, 1, 3)
         g.addWidget(self.split, 1, 4)
         g.addWidget(self.lock, 1, 5)
+        # radio keys (pressed over the panel socket; PRE and ATU state comes back from the radio) -------------
+        keys_l = QHBoxLayout()
+        keys_l.addWidget(QLabel("Keys"))
+        self._key_buttons: dict[str, QPushButton] = {}
+        for key, label, tip in (("PRE", "PRE", "Preamp key (cycles the radio's preamp setting)"),
+                                ("AB", "A/B", "Swap VFO A and B"), ("VM", "V/M", "VFO / memory"),
+                                ("FST", "FST", "Fast tuning")):
+            b = _btn(label, slot=lambda _=False, k=key: self.press_key(k))
+            b.setToolTip(tip)
+            self._key_buttons[key] = b
+            keys_l.addWidget(b)
+        atu = _btn("ATU", slot=lambda: self.press_key("ATU"))
+        atu.setToolTip("Antenna tuner on/off")
+        self._key_buttons["ATU"] = atu
+        keys_l.addWidget(atu)
+        self.atu_tune = _btn("Tune ATU", slot=self.tune_atu)
+        self.atu_tune.setToolTip("Starts an antenna-tuner cycle: the radio TRANSMITS a carrier while it tunes. "
+                                 "Needs 'Enable transmit controls'.")
+        keys_l.addWidget(self.atu_tune)
+        self.pair_btn = _btn("Pair...", slot=self.pair_panel)
+        self.pair_btn.setToolTip("These keys need this app to be paired with the radio (6-digit code)")
+        keys_l.addWidget(self.pair_btn)
+        keys_l.addStretch(1)
+        g.addLayout(keys_l, 2, 0, 1, 7)
+        self._panel_up = False
         v.addWidget(rx)
 
         # audio -------------------------------------------------------------------
@@ -283,7 +311,10 @@ class MainWindow(QMainWindow):
         self.w.spectrum.connect(self.spectrum.push)
         self.w.panel_status.connect(self.on_panel_status)
         self.w.panel_info.connect(self.on_panel_info)
+        self.w.panel_notice.connect(lambda m: self.statusBar().showMessage(m, 8000))
+        self.w.panel_paired.connect(self.on_paired)
         self.w.raw.connect(lambda s: self.log.appendPlainText(s) if self.dock.isVisible() else None)
+        self._update_key_buttons()
         self.resize(760, 1040)
 
     # state -> widgets ----------------------------------------------------------------
@@ -450,6 +481,7 @@ class MainWindow(QMainWindow):
         self.pc_mic.setEnabled(on and AUDIO_OK)
         if not on and self._ptt_on:
             self.set_ptt(False)
+        self._update_key_buttons()
 
     def set_ptt(self, on: bool) -> None:
         if on and (not self.tx_enable.isChecked() or not self.w.client):
@@ -473,6 +505,7 @@ class MainWindow(QMainWindow):
             self.mic.stop()
             self.w.set_tx_source(None)
         self.ptt.setDown(on) if not self.ptt.isDown() else None
+        self._update_key_buttons()
 
     def _tx_watchdog(self) -> None:
         if self._ptt_on and time.monotonic() - self._tx_since > self.tx_limit.value():
@@ -524,6 +557,7 @@ class MainWindow(QMainWindow):
     def connect_to(self, url: str, panel_url: str | None = None) -> None:
         self.connect_btn.setText("Disconnect")
         self._panel_url = panel_url or panel_url_for(url)
+        self.w.set_panel_token(load_panel_token(self._panel_url))
         self.w.connect_to(url)
         if self.spectrum_act.isChecked():
             self.spectrum.clear()
@@ -540,12 +574,64 @@ class MainWindow(QMainWindow):
             self.spectrum.set_plan(info.plan)
         elif kind == "spots":
             self.spectrum.set_spots(info.spots)
-        elif kind in ("state", "ft8"):
+        elif kind in ("state", "ft8", "role"):
             self._update_status_strip()
+            self._update_key_buttons()
         elif kind == "cw":
             self.cw_view.setPlainText(info.cw_text)
             self.cw_view.verticalScrollBar().setValue(self.cw_view.verticalScrollBar().maximum())
             self._update_cw_visibility()
+
+    # radio keys ----------------------------------------------------------------------------------------
+    def _set_on(self, btn: QPushButton, on: bool) -> None:
+        if btn.property("on") != on:
+            btn.setProperty("on", on)
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+
+    def _update_key_buttons(self) -> None:
+        info = self.w.info
+        paired = info.role in ("operate", "admin")
+        for b in self._key_buttons.values():
+            b.setEnabled(self._panel_up)
+        self.atu_tune.setEnabled(self._panel_up and paired and self.tx_enable.isChecked() and not self._ptt_on)
+        self.pair_btn.setVisible(self._panel_up and not paired)
+        st = info.state
+        self._set_on(self._key_buttons["PRE"], bool(st.get("pre")))
+        self._set_on(self._key_buttons["ATU"], bool(st.get("atu")))
+        self._set_on(self._key_buttons["AB"], bool(st.get("vfo")))
+
+    def press_key(self, key: str) -> None:
+        self.w.press_key(key)
+
+    def tune_atu(self) -> None:
+        if not self.tx_enable.isChecked() or self._ptt_on:
+            return
+        self.statusBar().showMessage("ATU tuning: the radio is transmitting a carrier", 4000)
+        self.w.press_key("ATU", 1.2)                 # a long press starts a tune cycle, as on the radio's page
+
+    def pair_panel(self) -> None:
+        code, ok = QInputDialog.getText(self, "Pair with the radio",
+                                        "Pairing code (6 digits) from the radio:")
+        code = code.strip()
+        if not ok:
+            return
+        if not (code.isdigit() and len(code) == 6):
+            self.statusBar().showMessage("The pairing code is 6 digits", 5000)
+            return
+        name = ("x6100-tci-remote on " + platform.node())[:32].replace("_", "-")
+        self.w.pair_panel(code, "".join(c if c.isalnum() or c in " .-" else "-" for c in name))
+
+    def on_paired(self, role: str, key: str) -> None:
+        if key:
+            url = self._panel_url or ""
+            save_panel_token(url, key)
+            self.w.set_panel_token(key)
+            self.statusBar().showMessage("Paired as %s. The key is saved for this radio." % role, 8000)
+        else:
+            self.statusBar().showMessage("The radio accepted the pairing (%s) but I found no key in its reply, "
+                                         "so it will not survive a restart." % role, 10000)
+        self._update_key_buttons()
 
     def _update_status_strip(self) -> None:
         info = self.w.info
@@ -565,6 +651,8 @@ class MainWindow(QMainWindow):
         self.cw_box.setVisible(self.state.mode in ("cw", "cwr"))
 
     def on_panel_status(self, state: str, detail: str) -> None:
+        self._panel_up = state == "connected"
+        self._update_key_buttons()
         if state == "connected":
             self.spectrum.set_message("Waiting for spectrum...")
         elif state == "connecting":

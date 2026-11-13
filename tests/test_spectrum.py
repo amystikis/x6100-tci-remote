@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 
 from x6100_remote.fakeradio import FakeRadio, serve_fake_panel
-from x6100_remote.spectrum import (ALLOWED_COMMANDS, HEADER_SIZE, PanelClient, SpectrumFrame,
-                                   pack_frame, parse_frame)
+from x6100_remote.spectrum import (HEADER_SIZE, KEY_NAMES, ControlDenied, PanelClient, SpectrumFrame,
+                                   is_allowed, pack_frame, parse_frame)
 
 
 def test_header_layout_matches_captured_frame():
@@ -53,7 +53,7 @@ def test_client_sends_only_whitelisted_commands_and_receives_frames():
             assert [b.seq for b in got] == sorted(b.seq for b in got)
             await asyncio.sleep(0.25)                                       # keepalive pings
             assert panel.log[:2] == ["screen 0", "panel 1"]
-            assert set(panel.log) <= set(ALLOWED_COMMANDS) and "ping 1" in panel.log
+            assert all(is_allowed(m) for m in panel.log) and "ping 1" in panel.log
         finally:
             await c.close()
             task.cancel()
@@ -225,3 +225,101 @@ def test_spot_layout_hit_testing_and_band_plan():
     v.set_show_spots(False)
     v.grab()
     assert v._spot_boxes == [] and v.spot_at(box.center().x(), box.center().y()) is None
+
+
+# ---- keys, pairing, role gating ----------------------------------------------------------------------
+def test_whitelist_never_allows_power_or_ptt():
+    for ok in ("screen 0", "panel 1", "ping 1", "control take", "control release", "key PRE 1", "key ATU 0",
+               "pair 123456 my-app", "auth " + "ab" * 16):
+        assert is_allowed(ok), ok
+    for bad in ("key POWER 1", "key PTT 1", "key KEY 1", "key MFK 1", "key PRE 2", "key PRE", "screen 1",
+                "pair 12345 x", "pair 123456", "auth zz", "control grab", "key PRE 1; key POWER 1", "key  PRE 1"):
+        assert not is_allowed(bad), bad
+    assert set(KEY_NAMES) == {"PRE", "AB", "VM", "FST", "ATU"}
+
+
+async def _with_panel(body):
+    radio = FakeRadio()
+    panel, server = await serve_fake_panel(radio, 0)
+    url = "ws://127.0.0.1:%d/" % server.sockets[0].getsockname()[1]
+    try:
+        await body(panel, url)
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+async def _run_client(url, token=None):
+    c = PanelClient(url, token=token)
+    task = asyncio.ensure_future(c.run())
+    for _ in range(100):
+        if c.info.hello:
+            break
+        await asyncio.sleep(0.02)
+    return c, task
+
+
+def test_unpaired_client_cannot_press_keys():
+    async def body(panel, url):
+        c, task = await _run_client(url)
+        try:
+            assert c.info.role == "view"
+            with pytest.raises(ControlDenied):
+                await c.press("PRE")
+            with pytest.raises(ValueError):
+                await c.press("POWER")
+            await asyncio.sleep(0.1)
+            assert not any(m.startswith(("key", "control")) for m in panel.log) and panel.keys_pressed == []
+        finally:
+            await c.close()
+            task.cancel()
+    asyncio.run(_with_panel(body))
+
+
+def test_pairing_then_key_press_changes_radio_state():
+    async def body(panel, url):
+        c, task = await _run_client(url)
+        paired = []
+        c.on_paired = lambda role, key: paired.append((role, key))
+        try:
+            await c.pair("000000", "x")                                   # wrong code: nothing happens
+            await asyncio.sleep(0.15)
+            assert paired == [] and c.info.role == "view"
+            await c.pair("123456", "test-app")
+            for _ in range(100):
+                if paired:
+                    break
+                await asyncio.sleep(0.02)
+            assert paired == [("operate", panel.TOKEN)]
+            await asyncio.sleep(0.1)
+            assert c.info.role == "operate" and c.info.tx_allowed
+            before = c.info.state["pre"]
+            await c.press("PRE")
+            await asyncio.sleep(0.2)
+            assert panel.keys_pressed == ["PRE"] and c.info.state["pre"] == (before + 1) % 3
+            assert panel.log[-3:] == ["key PRE 1", "key PRE 0", "control release"]
+        finally:
+            await c.close()
+            task.cancel()
+    asyncio.run(_with_panel(body))
+
+
+def test_saved_key_authenticates_a_new_connection():
+    async def body(panel, url):
+        c, task = await _run_client(url, token=panel.TOKEN)
+        try:
+            for _ in range(100):
+                if c.info.role == "operate":
+                    break
+                await asyncio.sleep(0.02)
+            assert c.info.role == "operate" and panel.log[0] == "auth " + panel.TOKEN
+        finally:
+            await c.close()
+            task.cancel()
+        c2, task2 = await _run_client(url, token="not-hex!")                 # malformed key is dropped, not sent
+        try:
+            assert c2.token is None and c2.info.role == "view"
+        finally:
+            await c2.close()
+            task2.cancel()
+    asyncio.run(_with_panel(body))

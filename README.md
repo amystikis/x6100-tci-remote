@@ -47,6 +47,15 @@ automatic (the radio's bin values are not calibrated). Hide it with View > Spect
 - **Radio status strip**: preamp, attenuator, NB, NR, squelch, RF gain, power, tuner, battery, FT8 app open (read-only).
 - **CW decoder** text decoded by the radio, shown when you are in CW or text arrives.
 
+### Radio keys (Receiver box)
+
+PRE, A/B, V/M, FST and ATU act like pressing those keys on the radio (sent over the panel socket; TCI cannot do
+them). PRE and ATU light up from the radio's reported state. **They need this app to be paired with the radio**:
+click **Pair...** and enter the radio's 6-digit pairing code; the key the radio returns is saved for that radio.
+Until paired, the buttons only tell you so and send nothing. The app can only ever press those five keys (never
+POWER or PTT). **Tune ATU** makes the radio transmit a carrier while it tunes, so it also needs "Enable transmit
+controls". With `--demo`, the fake radio's pairing code is `123456`.
+
 ## Safety
 
 - Transmit controls are off until you tick "Enable transmit controls".

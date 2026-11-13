@@ -48,3 +48,14 @@ Decoded by `src/x6100_remote/panelinfo.py` (formats and examples are in its docs
 (`[lo, hi, kind]`, kind 0 CW / 1 digital / 2 phone / 3 other, inferred), `spots` (resent about every 15 s; `a` looks like age in
 minutes), `state` (sent on connect; later updates not yet observed), `ft8` and `cw` (decoded text; whether it sends increments or
 the whole buffer is not known, so the client merges both ways).
+
+### Control over the panel socket (pairing and keys)
+
+Taken from the radio's web page code; the exact replies are partly inferred and **not yet confirmed on a real radio**.
+
+- A new device sends `pair <6-digit code> <name>`; the radio answers `paired <role> ...` (role `operate` or `admin`) and a
+  key, which the device stores and sends first on later connections as `auth <key>`. Unpaired connections get `role view 0 -`.
+- `control take` / `control release` claim and release control. Key presses are `key NAME 1` then `key NAME 0`.
+- Keys the radio lists: POWER GEN KEY DFN PTT BAND_DOWN BAND_UP APP MSG DFL AM CW SSB F1-F5 AB PRE ATU VM AGC FST LOCK VOL MFK.
+  This app whitelists PRE, AB, VM, FST, ATU only. NB, NR, attenuator, squelch and RF gain have no key.
+- Other commands the page knows but this app does not use: `tune`, `vol`, `ft8`, `logq`, `sessions`, `revoke`, `unpair`, `away`.
