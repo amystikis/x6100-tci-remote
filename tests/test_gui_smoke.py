@@ -132,8 +132,16 @@ def test_panel_info_shows_in_window(env):
     win.w.connect_panel("ws://127.0.0.1:%d/" % pserver.sockets[0].getsockname()[1])
     pump(lambda: len(win.w.info.spots) == 5 and win.cw_view.toPlainText() != "")
     assert "PWR" in win.status_strip.text() and "5 W" in win.status_strip.text() and "FT8" in win.status_strip.text()
-    assert not win.status_strip.isHidden() and not win.cw_box.isHidden()
+    assert not win.status_strip.isHidden()
+    assert win.cw_box.isHidden()                                       # LSB: CW box hidden even with text
+    win.w.send("modulation", 0, "cw")
+    pump(lambda: not win.cw_box.isHidden())                            # CW mode: shown
+    win.w.send("modulation", 0, "usb")
+    pump(lambda: win.cw_box.isHidden())
+    win.w.send("modulation", 0, "cw")
+    pump(lambda: not win.cw_box.isHidden())
     assert "CQ CQ DE" in win.cw_view.toPlainText()
+    assert win.cw_view.height() >= 80
     assert len(win.spectrum._plan) == 4 and len(win.spectrum._spots) == 5
     win.spots_act.setChecked(False)
     assert win.spectrum.show_spots is False

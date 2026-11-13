@@ -132,7 +132,7 @@ class MainWindow(QMainWindow):
         cwl = QHBoxLayout(self.cw_box)
         self.cw_view = QPlainTextEdit()
         self.cw_view.setReadOnly(True)
-        self.cw_view.setFixedHeight(54)
+        self.cw_view.setFixedHeight(88)          # 4 lines
         self.cw_view.setMaximumBlockCount(500)
         self.cw_view.setStyleSheet("font-family:monospace; font-size:14px; color:#f0a830;")
         cwl.addWidget(self.cw_view, 1)
@@ -562,7 +562,7 @@ class MainWindow(QMainWindow):
         self.status_strip.setVisible(bool(parts))
 
     def _update_cw_visibility(self) -> None:
-        self.cw_box.setVisible(bool(self.w.info.cw_text.strip()) or self.state.mode in ("cw", "cwr"))
+        self.cw_box.setVisible(self.state.mode in ("cw", "cwr"))
 
     def on_panel_status(self, state: str, detail: str) -> None:
         if state == "connected":
