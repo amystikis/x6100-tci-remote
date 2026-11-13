@@ -12,15 +12,15 @@ DEPENDS="python3 (>= 3.10), python3-venv"
 # Qt system libraries: Recommends, so a library with a different name on an older distro cannot block the install
 RECOMMENDS="libegl1, libgl1, libfontconfig1, libdbus-1-3, libxkbcommon-x11-0, libxcb-cursor0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-render-util0, libxcb-shape0, libxcb-xinerama0"
 
-rm -rf "$ROOT" && mkdir -p "$ROOT"/{DEBIAN,usr/bin,usr/lib/python3/dist-packages,usr/share/applications,usr/share/icons/hicolor/scalable/apps,usr/share/doc/$PKG}
-cp -r src/x6100_remote "$ROOT/usr/lib/python3/dist-packages/"
+rm -rf "$ROOT" && mkdir -p "$ROOT"/{DEBIAN,usr/bin,usr/lib/$PKG,usr/share/applications,usr/share/icons/hicolor/scalable/apps,usr/share/doc/$PKG}
+cp -r src/x6100_remote "$ROOT/usr/lib/$PKG/"
 find "$ROOT" -name __pycache__ -type d -prune -exec rm -rf {} +
 find "$ROOT" -type d -exec chmod 755 {} + && find "$ROOT" -type f -exec chmod 644 {} +
 cat > "$ROOT/usr/bin/x6100-tci-remote" <<'WRAP'
 #!/bin/sh
 PY=python3
 [ -x /opt/x6100-tci-remote/venv/bin/python ] && PY=/opt/x6100-tci-remote/venv/bin/python
-exec "$PY" -m x6100_remote "$@"
+PYTHONPATH=/usr/lib/x6100-tci-remote${PYTHONPATH:+:$PYTHONPATH} exec "$PY" -m x6100_remote "$@"
 WRAP
 chmod 755 "$ROOT/usr/bin/x6100-tci-remote"
 install -m 644 LICENSE "$ROOT/usr/share/doc/$PKG/copyright"

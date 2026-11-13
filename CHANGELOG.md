@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2
+
+- `.deb`: fix the app not starting after install. The code now lives in `/usr/lib/x6100-tci-remote` and the launcher puts it on
+  `PYTHONPATH`, so the private virtualenv (which holds PySide6, websockets, numpy) can import it.
+
 ## 0.2.1
 
 - `.deb`: only `python3` and `python3-venv` are hard dependencies now (the Qt system libraries are recommended), so apt cannot refuse
