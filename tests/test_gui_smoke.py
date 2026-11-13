@@ -254,3 +254,23 @@ def test_second_instance_does_not_steal_the_hotkey_socket(env):
             "from x6100_remote.ipc import CommandServer; print(CommandServer(lambda c: 'x', %r).start())" % name)
     assert _cli(pump, name, code=code) == (0, "False")
     win.cmd_server.stop()
+
+
+def test_drive_slider_sends_on_wheel_keys_click_and_drag(env):
+    from PySide6.QtWidgets import QSlider
+    win, radio, pump = env
+    win.tx_enable.setChecked(True)
+    start = radio.drive
+    win.drive.setValue(start + 7)                                            # what a wheel notch / click does
+    pump(lambda: radio.drive == start + 7)
+    win.drive.triggerAction(QSlider.SliderAction.SliderSingleStepAdd)        # arrow key
+    pump(lambda: radio.drive == start + 8)
+    for v in range(10, 61, 5):                                               # a fast scroll: many changes at once
+        win.drive.setValue(v)
+    pump(lambda: radio.drive == 60)                                          # the last value always arrives
+    sent = [m for m in radio.log if m.startswith("drive")]
+    assert len(sent) < 14                                                    # throttled, not one message per step
+    pump(lambda: win.drive.value() == 60 and win.drive_lbl.text() == "60")   # the radio's echo does not undo it
+    win.drive.setValue(61)
+    win.drive.sliderReleased.emit()                                          # release sends at once
+    pump(lambda: radio.drive == 61)

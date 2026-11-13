@@ -254,8 +254,18 @@ class MainWindow(QMainWindow):
         tl.addWidget(QLabel("Drive"), 2, 0)
         self.drive = QSlider(Qt.Orientation.Horizontal)
         self.drive.setRange(0, 100)
-        self.drive.sliderReleased.connect(lambda: self.w.send("drive", 0, self.drive.value()))
         self.drive_lbl = QLabel("-")
+        # send while dragging, scrolling the wheel, using the keys or clicking the bar (not only on mouse release);
+        # at most ~12 per second, and the final value is always sent
+        self._drive_sent: int | None = None
+        self._drive_pending = False
+        self._drive_local_at = 0.0
+        self._drive_timer = QTimer(self)
+        self._drive_timer.setSingleShot(True)
+        self._drive_timer.setInterval(80)
+        self._drive_timer.timeout.connect(self._drive_tick)
+        self.drive.valueChanged.connect(self._drive_changed)
+        self.drive.sliderReleased.connect(self._drive_flush)
         tl.addWidget(self.drive, 2, 1, 1, 2)
         tl.addWidget(self.drive_lbl, 2, 3)
         tl.addWidget(QLabel("Auto-unkey after"), 3, 0)
@@ -367,8 +377,12 @@ class MainWindow(QMainWindow):
             self.rit_off.setValue(st.rit_offset)
         if what in ("", "split_enable"):
             self.split.setChecked(st.split)
-        if what in ("", "drive") and not self.drive.isSliderDown():
+        if (what in ("", "drive") and not self.drive.isSliderDown()
+                and time.monotonic() - self._drive_local_at > 0.8):      # do not fight our own recent changes
+            self.drive.blockSignals(True)
             self.drive.setValue(st.drive)
+            self.drive.blockSignals(False)
+            self._drive_sent = st.drive
             self.drive_lbl.setText(str(st.drive))
         if what in ("", "trx"):
             self.tx_banner.setVisible(st.trx)
@@ -444,6 +458,31 @@ class MainWindow(QMainWindow):
         """Tune to an absolute frequency (clicked in the spectrum)."""
         base = self._freq_target if self._freq_target is not None else self.state.freq
         self.tune_by(hz - base)
+
+    def _drive_changed(self, value: int) -> None:
+        self.drive_lbl.setText(str(value))
+        self._drive_local_at = time.monotonic()
+        if self._drive_timer.isActive():
+            self._drive_pending = True                    # sent when the timer fires
+        else:
+            self._drive_send()
+            self._drive_timer.start()
+
+    def _drive_send(self) -> None:
+        v = self.drive.value()
+        if v != self._drive_sent and self.w.client:
+            self._drive_sent = v
+            self.w.send("drive", 0, v)
+        self._drive_pending = False
+
+    def _drive_tick(self) -> None:
+        if self._drive_pending:
+            self._drive_send()
+            self._drive_timer.start()
+
+    def _drive_flush(self) -> None:
+        self._drive_timer.stop()
+        self._drive_send()
 
     def _show_group(self, key: str, box: QGroupBox, on: bool) -> None:
         save_flag("show_" + key, on)
