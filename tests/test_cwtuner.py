@@ -114,3 +114,20 @@ def test_meter_sits_top_left_of_the_vfo_line_and_spots_keep_clear():
     v.set_cw_tuner(None)
     v.grab()
     assert len(v._spot_boxes) >= len(drawn)                                  # all back when the meter is off
+
+
+ALIGN_TOL = 20.0
+
+
+def test_signal_at_the_cw_pitch_is_on_tone_and_cwr_mirrors():
+    from x6100_remote.cwtuner import target_hz
+    assert target_hz("cw", 600) == 600 and target_hz("cwr", 600) == -600
+    t = analyze(frame_with({600.0: 60}), 500, target_hz=600)
+    assert t is not None and t.aligned and abs(t.offset_hz) < ALIGN_TOL
+    t = analyze(frame_with({-600.0: 60}), 500, target_hz=-600)
+    assert t is not None and t.aligned
+    off = analyze(frame_with({650.0: 60}), 500, target_hz=600)
+    assert off is not None and 20 < off.offset_hz < 80 and not off.aligned          # 50 Hz high of the tone
+    # a signal on the VFO line is NOT on tone any more when the pitch is 600
+    on_line = analyze(frame_with({0.0: 60}), 500, target_hz=600)
+    assert on_line is None or not on_line.aligned

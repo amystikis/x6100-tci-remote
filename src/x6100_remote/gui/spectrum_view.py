@@ -81,6 +81,7 @@ class SpectrumView(QWidget):
         self.show_cw_tuner = True
         self._cw_bw: int | None = None                # passband width (Hz) while in CW/CW-R, else None
         self._cw_tune: CwTune | None = None
+        self._cw_target = 0.0
         self._spot_boxes: list[tuple[QRectF, Spot]] = []
 
     # data --------------------------------------------------------------------------------------
@@ -102,10 +103,13 @@ class SpectrumView(QWidget):
         self._spots = list(spots)
         self.update()
 
-    def set_cw_tuner(self, bandwidth_hz: int | None) -> None:
-        """Enable the CW tuner indicator with the passband width (None: not in a CW mode)."""
+    def set_cw_tuner(self, bandwidth_hz: int | None, target_hz: float = 0.0) -> None:
+        """Enable the CW tuner indicator: passband width and where the tuned signal should sit relative to the VFO
+        (the CW pitch, negative in CW-R). None: not in a CW mode."""
         self._cw_bw = bandwidth_hz
-        self._cw_tune = analyze(self._frame, bandwidth_hz) if (bandwidth_hz and self._frame) else None
+        self._cw_target = float(target_hz)
+        self._cw_tune = (analyze(self._frame, bandwidth_hz, target_hz=self._cw_target)
+                         if (bandwidth_hz and self._frame) else None)
         self.update()
 
     def set_show_cw_tuner(self, on: bool) -> None:
@@ -141,7 +145,8 @@ class SpectrumView(QWidget):
         self._wf[1:] = self._wf[:-1].copy()
         self._wf[0] = row
         self._level, self._frame = level, frame
-        self._cw_tune = smooth(self._cw_tune, analyze(frame, self._cw_bw), self._cw_bw) if self._cw_bw else None
+        self._cw_tune = (smooth(self._cw_tune, analyze(frame, self._cw_bw, target_hz=self._cw_target), self._cw_bw)
+                         if self._cw_bw else None)
         self.frames += 1
         self.update()
 
@@ -325,7 +330,7 @@ class SpectrumView(QWidget):
         top = rect.top() + 3
         x0, x1 = rect.left(), rect.right()
         p.fillRect(rect, QColor(5, 10, 20, 190))
-        levels = np.clip(window_levels(f, half, n, values=self._level), 0.0, 1.0)
+        levels = np.clip(window_levels(f, half, n, values=self._level, centre_hz=self._cw_target), 0.0, 1.0)
         bar_w = (x1 - x0) / n
         tune = self._cw_tune
         peak_i = None

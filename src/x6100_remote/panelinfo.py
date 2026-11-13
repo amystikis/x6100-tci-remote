@@ -131,6 +131,12 @@ class PanelInfo:
         return [s for s in self.spots if lo <= s.freq <= hi]
 
     @property
+    def cw_pitch(self) -> int:
+        """CW pitch in Hz (``kt`` in the panel state; radios before it sent none, the default is 700 Hz)."""
+        kt = self.state.get("kt")
+        return int(kt) if isinstance(kt, (int, float)) and 100 <= kt <= 2000 else 700
+
+    @property
     def battery(self) -> Optional[int]:
         b = self.state.get("bat", -1)
         return int(b) if isinstance(b, (int, float)) and b >= 0 else None

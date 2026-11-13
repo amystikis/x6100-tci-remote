@@ -1,8 +1,9 @@
 """CW tuning aid: where is the strongest signal relative to the VFO line, and how does it sit in the passband?
 
-In CW and CW-R the OpenX6X00 spectrum and panel draw the passband centred on the VFO line, so a station is tuned
-correctly when its peak sits on that line. This module reads the radio's spectrum bins around the line and
-estimates the peak's offset in Hz (parabolic interpolation over the three bins at the peak).
+A CW station is tuned correctly when its peak sits one CW pitch from the VFO frequency (above it in CW, below it in
+CW-R), the way other radios' CW tuning aids work. The pitch is the radio's ``kt`` (default 700 Hz). This module
+reads the radio's spectrum bins around that point and estimates the peak's offset in Hz (parabolic
+interpolation over the three bins at the peak).
 
 The resolution is limited by the radio's spectrum frame: 1024 bins over the span (about 98 Hz per bin at 100 kHz).
 Over a narrow window that is only a handful of bins, so the offset is an estimate, accurate to a few tens of Hz
@@ -30,25 +31,34 @@ class CwTune:
 
 
 def window_levels(frame: SpectrumFrame, half_window_hz: float, n: int,
-                  values: Optional[np.ndarray] = None) -> np.ndarray:
+                  values: Optional[np.ndarray] = None, centre_hz: float = 0.0) -> np.ndarray:
     """``n`` values sampled evenly over centre +- ``half_window_hz`` (linear interpolation). Uses the raw bins unless
     ``values`` (one number per bin, e.g. auto-levelled 0..1) is given."""
     nb = len(frame.bins)
     centre_idx = nb / 2.0
     offsets = np.linspace(-half_window_hz, half_window_hz, n, endpoint=False) + half_window_hz / n
-    idx = centre_idx + offsets / frame.hz_per_bin
+    idx = centre_idx + (centre_hz + offsets) / frame.hz_per_bin
     src = frame.bins if values is None else values
     return np.interp(idx, np.arange(nb), np.asarray(src, dtype=np.float64))
 
 
-def analyze(frame: SpectrumFrame, bandwidth_hz: float, half_window_hz: Optional[float] = None) -> Optional[CwTune]:
-    """Find the strongest peak near the VFO line. Returns ``None`` when nothing stands out."""
+def target_hz(mode: str, pitch_hz: float) -> float:
+    """Where a correctly tuned CW signal sits relative to the VFO frequency in the spectrum: the CW pitch above it in
+    CW, below it in CW-R (the displayed frequency is the carrier; the signal is heard at the pitch)."""
+    return -float(pitch_hz) if mode == "cwr" else float(pitch_hz)
+
+
+def analyze(frame: SpectrumFrame, bandwidth_hz: float, half_window_hz: Optional[float] = None,
+            target_hz: float = 0.0) -> Optional[CwTune]:
+    """Find the strongest peak around ``target_hz`` (relative to the VFO). ``offset_hz`` is measured from the target,
+    so 0 means on the CW pitch. Returns ``None`` when nothing stands out."""
     half = half_window_hz if half_window_hz is not None else window_half_width(bandwidth_hz)
     nb = len(frame.bins)
     if nb < 8 or frame.span_hz <= 0:
         return None
     hz_bin = frame.hz_per_bin
-    centre = nb / 2.0
+    vfo = nb / 2.0
+    centre = vfo + target_hz / hz_bin
     lo = max(1, int(np.floor(centre - half / hz_bin)))
     hi = min(nb - 2, int(np.ceil(centre + half / hz_bin)))
     if hi < lo:

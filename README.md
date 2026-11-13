@@ -60,12 +60,14 @@ controls". With `--demo`, the fake radio's pairing code is `123456`.
 
 ## CW tuner indicator
 
-In CW and CW-R the receive passband is drawn centred on the VFO line (the radio's own CW filter is defined around the
-pitch, so it used to look off to one side), and a row of vertical bars is drawn on the VFO line: the spectrum over the
-passband, with the strongest signal highlighted (green when it sits on the line, orange inside the passband, red outside)
-and its offset in Hz beside the meter. Tune until the offset is near 0. The offset is an estimate from the radio's
-spectrum bins (about 98 Hz per bin at the 100 kHz span), smoothed over frames: expect an accuracy of a few tens of Hz.
-Switch it off in View > CW tuner indicator.
+Like other radios' CW tuning aids (Yaesu, Elecraft, UHSDR), the tuner measures against the **CW pitch**: a CW signal is
+on tone when its peak sits one pitch above the VFO frequency (below it in CW-R), because the displayed frequency is the
+carrier and the signal is heard at the pitch. The pitch is the radio's own setting (`kt` in the panel state, default
+700 Hz). In CW and CW-R the receive passband is drawn there, and a row of vertical bars (the spectrum around that point)
+sits at the top-left of the VFO line, with the strongest signal highlighted (green when on tone, orange inside the
+passband, red outside) and its offset from the tone in Hz beside the meter. Tune until the offset is near 0. The offset
+is an estimate from the radio's spectrum bins (about 98 Hz per bin at the 100 kHz span), smoothed over frames: expect an
+accuracy of a few tens of Hz. Switch it off in View > CW tuner indicator.
 
 ## PTT from an OS keyboard shortcut
 

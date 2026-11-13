@@ -287,7 +287,7 @@ def test_cw_modes_centre_the_passband_and_enable_the_tuner(env):
     win.w.send("rx_filter_band", 0, 350, 1050)                              # a 700 Hz CW filter around a 700 Hz pitch
     pump(lambda: win.state.mode == "cw" and win.state.filter_hi == 1050)
     pump(lambda: win.spectrum._cw_bw == 700)
-    assert win.spectrum._passband == (-350, 350)                            # centred on the VFO line, not +350..+1050
+    assert win.spectrum._passband == (350, 1050)  # one pitch above the VFO
     pump(lambda: win.spectrum._cw_tune is not None)                         # the fake CW signal (~70 Hz above the VFO)
     n = win.spectrum.frames
     pump(lambda: win.spectrum.frames >= n + 25, 6)                          # let the smoothing settle

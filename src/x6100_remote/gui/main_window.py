@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDockWidget, QFrame, QGridL
                                QPushButton, QSlider, QSpinBox, QVBoxLayout, QWidget)
 
 from .. import __version__
+from ..cwtuner import target_hz
 from ..ipc import CommandServer
 from .audio import AVAILABLE as AUDIO_OK, MicSource, RxAudio
 from .settings import (load_band_memory, load_flag, load_panel_token, load_radios, load_show_spectrum,
@@ -377,8 +378,7 @@ class MainWindow(QMainWindow):
             if st.mode in ("cw", "cwr"):
                 # the radio's CW filter is defined around the pitch; draw it centred on the VFO line, where the
                 # tuned signal sits, and switch the CW tuner bars on
-                self.spectrum.set_passband(-(bw // 2), bw // 2)
-                self.spectrum.set_cw_tuner(bw)
+                self._apply_cw_tuner(st.mode, bw)
             else:
                 self.spectrum.set_passband(st.filter_lo, st.filter_hi)
                 self.spectrum.set_cw_tuner(None)
@@ -642,6 +642,13 @@ class MainWindow(QMainWindow):
             self.spectrum.set_message("Waiting for spectrum...")
             self.w.connect_panel(self._panel_url)
 
+    def _apply_cw_tuner(self, mode: str, bw: int) -> None:
+        """A CW signal is tuned when it sits one CW pitch from the VFO (above in CW, below in CW-R): put the passband
+        overlay and the tuner meter there."""
+        target = target_hz(mode, self.w.info.cw_pitch)
+        self.spectrum.set_passband(int(target - bw / 2), int(target + bw / 2))
+        self.spectrum.set_cw_tuner(bw, target)
+
     def on_panel_info(self, kind: str) -> None:
         info = self.w.info
         if kind == "plan":
@@ -651,6 +658,9 @@ class MainWindow(QMainWindow):
         elif kind in ("state", "ft8", "role"):
             self._update_status_strip()
             self._update_key_buttons()
+            st = self.state
+            if kind == "state" and st.mode in ("cw", "cwr"):
+                self._apply_cw_tuner(st.mode, abs(st.filter_hi - st.filter_lo))     # the pitch may have changed
         elif kind == "cw":
             self.cw_view.setPlainText(info.cw_text)
             self.cw_view.verticalScrollBar().setValue(self.cw_view.verticalScrollBar().maximum())
