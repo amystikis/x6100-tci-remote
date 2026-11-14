@@ -308,8 +308,11 @@ def test_cw_modes_centre_the_passband_and_enable_the_tuner(env):
 
 
 def test_zoom_and_colour_schemes(env):
-    win, _radio, pump = env
+    from x6100_remote.fakeradio import serve_fake_panel
     from x6100_remote.gui.spectrum_view import SPECTRUM_SCHEMES, WATERFALL_SCHEMES, ZOOM_LEVELS
+    win, radio, pump = env
+    panel, pserver = asyncio.run_coroutine_threadsafe(serve_fake_panel(radio, 0), win.w.loop).result(5)
+    win.w.connect_panel("ws://127.0.0.1:%d/" % pserver.sockets[0].getsockname()[1])
     assert [win.zoom.itemData(i) for i in range(win.zoom.count())] == list(ZOOM_LEVELS) == [1, 2, 4, 8]
     pump(lambda: win.spectrum._frame is not None)
     sv = win.spectrum
@@ -325,6 +328,8 @@ def test_zoom_and_colour_schemes(env):
     sv.set_spectrum_scheme("Amber")
     assert sv._trace_color.name() == SPECTRUM_SCHEMES["Amber"]
     sv.grab()
+    win.w.disconnect_panel()
+    asyncio.run_coroutine_threadsafe(asyncio.sleep(0.05), win.w.loop).result(2)
 
 
 def test_clock_connection_settings_and_status_bar(env):

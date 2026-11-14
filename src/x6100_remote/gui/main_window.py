@@ -579,6 +579,14 @@ class MainWindow(QMainWindow):
     def _tick_clock(self) -> None:
         self.clock.setText(datetime.now(timezone.utc).strftime("%H:%M:%S UTC"))
 
+    def _waterfall_scheme_chosen(self, name: str) -> None:
+        save_choice("waterfall_scheme", name)
+        self.spectrum.set_waterfall_scheme(name)
+
+    def _spectrum_scheme_chosen(self, name: str) -> None:
+        save_choice("spectrum_scheme", name)
+        self.spectrum.set_spectrum_scheme(name)
+
     def _build_settings_dialog(self) -> None:
         """Settings dialog: 'Connection' (radio address + connect) and 'Display' (colour schemes, applied at once)."""
         dlg = self.settings_dlg = QDialog(self)
@@ -601,8 +609,8 @@ class MainWindow(QMainWindow):
         sp.addItems(list(SPECTRUM_SCHEMES))
         wf.setCurrentText(self.wf_scheme())
         sp.setCurrentText(self.sp_scheme())
-        wf.currentTextChanged.connect(lambda n: (save_choice("waterfall_scheme", n), self.spectrum.set_waterfall_scheme(n)))
-        sp.currentTextChanged.connect(lambda n: (save_choice("spectrum_scheme", n), self.spectrum.set_spectrum_scheme(n)))
+        wf.currentTextChanged.connect(self._waterfall_scheme_chosen)
+        sp.currentTextChanged.connect(self._spectrum_scheme_chosen)
         form.addRow("Waterfall colours", wf)
         form.addRow("Spectrum colour", sp)
         tabs.addTab(page, "Display")
