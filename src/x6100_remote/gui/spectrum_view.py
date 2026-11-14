@@ -494,8 +494,8 @@ class SpectrumView(QWidget):
             base = front - t * depth
             xs = w / 2 + rel * w * (1.0 - 0.38 * t)
             ys = base - lv * amp_front * (1.0 - 0.45 * t)
-            poly = QPolygonF([QPointF(xs[0], base + 5)] + [QPointF(float(x), float(y)) for x, y in zip(xs, ys, strict=True)]
-                             + [QPointF(xs[-1], base + 5)])
+            pts = [QPointF(float(x), float(y)) for x, y in zip(xs, ys, strict=True)]
+            poly = QPolygonF([QPointF(xs[0], base + 5), *pts, QPointF(xs[-1], base + 5)])
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(6, 12, 24, 240))
             p.drawPolygon(poly)
