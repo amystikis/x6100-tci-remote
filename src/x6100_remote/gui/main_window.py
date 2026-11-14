@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timezone
 
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QAction, QFont, QKeyEvent
+from PySide6.QtGui import QAction, QActionGroup, QFont, QKeyEvent
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDockWidget, QFormLayout, QFrame, QGridLayout, QGroupBox,
                                QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMessageBox, QPlainTextEdit,
                                QPushButton, QSlider, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
@@ -20,7 +20,7 @@ from .settings import (load_band_memory, load_choice, load_flag, load_panel_toke
                        load_window_geometry, panel_url_for, parse_target, remember_radio, save_band_memory,
                        save_choice, save_flag, save_panel_token, save_show_spectrum, save_window_geometry)
 from .spectrum_view import (DEFAULT_SPECTRUM, DEFAULT_WATERFALL, SPECTRUM_SCHEMES, WATERFALL_SCHEMES,
-                            ZOOM_LEVELS, SpectrumView)
+                            WF_STYLES, ZOOM_LEVELS, SpectrumView)
 from .widgets import AMBER, FrequencyDisplay, SMeter
 from .worker import TciWorker
 
@@ -340,12 +340,19 @@ class MainWindow(QMainWindow):
         self.spectrum_act.setChecked(load_show_spectrum())
         self.spectrum_act.toggled.connect(self.toggle_spectrum)
         m.addAction(self.spectrum_act)
-        self.wf3d_act = QAction("3D waterfall", self)
-        self.wf3d_act.setCheckable(True)
-        self.wf3d_act.setChecked(load_flag("wf3d", False))
-        self.wf3d_act.toggled.connect(self._wf3d_toggled)
-        self.spectrum.set_waterfall_3d(self.wf3d_act.isChecked())
-        m.addAction(self.wf3d_act)
+        wfm = m.addMenu("Waterfall style")
+        self.wf_style_acts: dict[str, QAction] = {}
+        group = QActionGroup(self)
+        current = load_choice("waterfall_style", "2d")
+        for key, label in WF_STYLES.items():
+            a = QAction(label, self)
+            a.setCheckable(True)
+            a.setChecked(key == current)
+            a.triggered.connect(lambda _checked=False, k=key: self._wf_style_chosen(k))
+            group.addAction(a)
+            wfm.addAction(a)
+            self.wf_style_acts[key] = a
+        self.spectrum.set_waterfall_style(current)
         act = self.dock.toggleViewAction()
         act.setText("Protocol log")
         m.addAction(act)
@@ -554,9 +561,9 @@ class MainWindow(QMainWindow):
         self._drive_timer.stop()
         self._drive_send()
 
-    def _wf3d_toggled(self, on: bool) -> None:
-        save_flag("wf3d", on)
-        self.spectrum.set_waterfall_3d(on)
+    def _wf_style_chosen(self, key: str) -> None:
+        save_choice("waterfall_style", key)
+        self.spectrum.set_waterfall_style(key)
 
     def _zoom_changed(self) -> None:
         self.spectrum.set_zoom(self.zoom.currentData())

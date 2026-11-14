@@ -5,7 +5,8 @@ import time
 
 import numpy as np
 from PySide6.QtCore import QLineF, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QPen, QPolygonF
+from PySide6.QtGui import (QColor, QFont, QFontMetricsF, QImage, QLinearGradient, QPainter, QPen, QPolygonF,
+                           QTransform)
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from ..cwtuner import (BAR_FALL_PER_S, HOLD_S, SHOWN_EVERY_S, SMOOTH_ALPHA, CwTune, analyze, smooth,
@@ -43,8 +44,12 @@ SPECTRUM_SCHEMES: dict[str, str] = {                                   # trace c
 DEFAULT_WATERFALL = "Classic"
 DEFAULT_SPECTRUM = "Green"
 ZOOM_LEVELS = (1, 2, 4, 8)
-WF3D_RIDGES = 44                # number of history lines drawn in the 3D waterfall
-WF3D_STEP = 3                   # waterfall rows between two ridges (rows arrive one per spectrum frame)
+WF_STYLES = {"2d": "Flat (2D)", "plane": "3D tilted plane", "ridges": "3D ridges"}
+WF3D_RIDGES = 24                # number of history lines drawn in the ridges style
+WF3D_STEP = 4                   # waterfall rows between two ridges (rows arrive one per spectrum frame)
+WF3D_MIN_INTERVAL = {"plane": 0.10, "ridges": 0.20}   # seconds: the 3D picture is redrawn at most this often (it is
+                                # the costly part); the cached picture is reused in between so the window, audio and
+                                # tuning stay responsive
 
 
 def make_lut(scheme: str = DEFAULT_WATERFALL) -> np.ndarray:
@@ -97,7 +102,11 @@ class SpectrumView(QWidget):
         self._wf: np.ndarray | None = None          # (rows, nbins) uint32 colours
         self._wl: np.ndarray | None = None          # (rows, nbins) uint8 levels (so a colour scheme can be swapped)
         self._zoom = 1
-        self._wf3d = False
+        self._wf_style = "2d"
+        self._wf3d_img: QImage | None = None           # cached 3D picture of the waterfall area
+        self._wf3d_key: tuple | None = None
+        self._wf3d_t = 0.0
+        self._wf3d_frames = -1
         self._trace_color = QColor(SPECTRUM_SCHEMES[DEFAULT_SPECTRUM])
         self._level: np.ndarray | None = None
         self._frame: SpectrumFrame | None = None
@@ -155,19 +164,22 @@ class SpectrumView(QWidget):
         self._zoom = zoom if zoom in ZOOM_LEVELS else 1
         self.update()
 
-    def set_waterfall_3d(self, on: bool) -> None:
-        self._wf3d = bool(on)
+    def set_waterfall_style(self, style: str) -> None:
+        self._wf_style = style if style in WF_STYLES else "2d"
+        self._wf3d_key = None
         self.update()
 
     def set_waterfall_scheme(self, name: str) -> None:
         self._lut = make_lut(name)
         self._bg = int(self._lut[0])
+        self._wf3d_key = None
         if self._wl is not None:
             self._wf = self._lut[self._wl]
         self.update()
 
     def set_spectrum_scheme(self, name: str) -> None:
         self._trace_color = QColor(SPECTRUM_SCHEMES.get(name, SPECTRUM_SCHEMES[DEFAULT_SPECTRUM]))
+        self._wf3d_key = None
         self.update()
 
     def set_show_cw_tuner(self, on: bool) -> None:
@@ -464,7 +476,7 @@ class SpectrumView(QWidget):
     def _paint_waterfall(self, p: QPainter, w: int, top: int, height: int) -> None:
         if height <= 0 or self._wf is None:
             return
-        if self._wf3d:
+        if self._wf_style != "2d":
             self._paint_waterfall3d(p, w, top, height)
             return
         rows, n = self._wf.shape
@@ -474,41 +486,93 @@ class SpectrumView(QWidget):
         p.drawImage(QRectF(0, top, w, height), img, QRectF((n - vis) / 2, 0, vis, rows))
 
     def _paint_waterfall3d(self, p: QPainter, w: int, top: int, height: int) -> None:
-        """Perspective waterfall: the newest spectrum in front, older ones stacked behind it (smaller and higher),
-        each drawn as a ridge whose height is the signal level and whose colour follows the waterfall scheme."""
+        """Blit the cached 3D picture, redrawing it only when something changed and at most every
+        WF3D_MIN_INTERVAL seconds (drawing it is far costlier than a flat waterfall)."""
         if height < 40 or self._wl is None:
             return
-        rows, n = self._wl.shape
-        npts = max(60, min(220, w // 4))
+        now = time.monotonic()
+        key = (w, height, self._zoom, self._wf_style, self.frames > 0)
+        stale = self._wf3d_frames != self.frames and now - self._wf3d_t >= WF3D_MIN_INTERVAL[self._wf_style]
+        if self._wf3d_img is None or key != self._wf3d_key or stale:
+            img = QImage(w, height, QImage.Format.Format_ARGB32_Premultiplied)
+            img.fill(QColor("#050a14"))
+            q = QPainter(img)
+            if self._wf_style == "plane":
+                self._draw_plane(q, w, height)
+            else:
+                self._draw_ridges(q, w, height)
+            q.end()
+            self._wf3d_img, self._wf3d_key, self._wf3d_t, self._wf3d_frames = img, key, now, self.frames
+        p.drawImage(0, top, self._wf3d_img)
+
+    def _visible_levels(self, row: np.ndarray, npts: int, scale: float = 255.0) -> np.ndarray:
+        n = len(row)
+        pos = (n - 1) / 2 + np.linspace(-0.5, 0.5, npts) * (n - 1) / self._zoom       # the part of the span in view
+        return np.interp(pos, np.arange(n), row.astype(np.float64)) / scale
+
+    def _draw_plane(self, q: QPainter, w: int, height: int) -> None:
+        """The flat waterfall laid down in perspective: newest at the front, older fading into the distance, with the
+        live spectrum standing up along the front edge."""
+        rows, n = self._wf.shape
+        vis = n / self._zoom
+        far = 0.30                                                      # the far edge is 30 % as wide as the front
+        y_far = height * 0.04
+        y_front = height * 0.94
+        src = QPolygonF([QPointF((n - vis) / 2, 0), QPointF((n + vis) / 2, 0),
+                         QPointF((n + vis) / 2, rows), QPointF((n - vis) / 2, rows)])
+        dst = QPolygonF([QPointF(0, y_front), QPointF(w, y_front),
+                         QPointF(w / 2 + w * (1 - far) / 2, y_far), QPointF(w / 2 - w * (1 - far) / 2, y_far)])
+        tr = QTransform.quadToQuad(src, dst)
+        if tr is not None:
+            q.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            q.setTransform(tr)
+            img = QImage(self._wf.data, n, rows, n * 4, QImage.Format.Format_ARGB32)
+            q.drawImage(QRectF((n - vis) / 2, 0, vis, rows), img, QRectF((n - vis) / 2, 0, vis, rows))
+            q.resetTransform()
+        fade = QLinearGradient(0, y_far, 0, y_front)                    # distance haze
+        fade.setColorAt(0.0, QColor(5, 10, 20, 255))
+        fade.setColorAt(0.75, QColor(5, 10, 20, 0))
+        q.fillRect(QRectF(0, 0, w, y_front), fade)
+        if self._level is not None:                                     # live spectrum along the front edge
+            lv = self._visible_levels(self._level, max(60, min(400, w // 2)), 1.0)       # already 0..1
+            xs = np.linspace(0, w, len(lv))
+            ys = y_front - lv * height * 0.28
+            pts = [QPointF(float(x), float(y)) for x, y in zip(xs, ys, strict=True)]
+            fill = QColor(self._trace_color)
+            fill.setAlpha(70)
+            q.setPen(Qt.PenStyle.NoPen)
+            q.setBrush(fill)
+            q.drawPolygon(QPolygonF([QPointF(0, y_front), *pts, QPointF(w, y_front)]))
+            q.setBrush(Qt.BrushStyle.NoBrush)
+            q.setPen(QPen(self._trace_color, 1.4))
+            q.drawPolyline(QPolygonF(pts))
+
+    def _draw_ridges(self, q: QPainter, w: int, height: int) -> None:
+        """Recent spectra stacked in perspective as ridges (height = level, colour = waterfall scheme)."""
+        rows = self._wl.shape[0]
+        npts = max(60, min(110, w // 8))
         rel = np.linspace(-0.5, 0.5, npts)
-        pos = (n - 1) / 2 + rel * (n - 1) / self._zoom                  # same visible part of the span as the trace
         count = max(2, min(WF3D_RIDGES, (rows - 1) // WF3D_STEP + 1))
-        front, depth, amp_front = top + height * 0.96, height * 0.60, height * 0.36
-        p.save()
-        p.setClipRect(QRectF(0, top, w, height))
-        p.fillRect(QRectF(0, top, w, height), QColor("#050a14"))
-        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        front, depth, amp_front = height * 0.96, height * 0.60, height * 0.36
         for k in range(count - 1, -1, -1):                              # far to near, so near ridges cover far ones
             t = k / (count - 1)
-            lv = np.interp(pos, np.arange(n), self._wl[k * WF3D_STEP].astype(np.float64)) / 255.0
+            lv = self._visible_levels(self._wl[k * WF3D_STEP], npts)
             base = front - t * depth
             xs = w / 2 + rel * w * (1.0 - 0.38 * t)
             ys = base - lv * amp_front * (1.0 - 0.45 * t)
             pts = [QPointF(float(x), float(y)) for x, y in zip(xs, ys, strict=True)]
-            poly = QPolygonF([QPointF(xs[0], base + 5), *pts, QPointF(xs[-1], base + 5)])
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(6, 12, 24, 240))
-            p.drawPolygon(poly)
+            q.setPen(Qt.PenStyle.NoPen)
+            q.setBrush(QColor(6, 12, 24, 255))
+            q.drawPolygon(QPolygonF([QPointF(xs[0], base + 5), *pts, QPointF(xs[-1], base + 5)]))
             ci = np.clip(40 + lv * 215, 0, 255).astype(int)
-            seg = (ci[:-1] + ci[1:]) // 2 >> 4                            # 16 colour buckets along the ridge
+            seg = (ci[:-1] + ci[1:]) // 2 >> 5                            # 8 colour buckets along the ridge
             alpha = int(255 - 110 * t)
             for b in np.unique(seg):
-                colour = QColor.fromRgb(int(self._lut[int(b) * 16 + 8]))
+                colour = QColor.fromRgb(int(self._lut[int(b) * 32 + 16]))
                 colour.setAlpha(alpha)
-                p.setPen(QPen(colour, 1.4))
-                p.drawLines([QLineF(float(xs[i]), float(ys[i]), float(xs[i + 1]), float(ys[i + 1]))
+                q.setPen(QPen(colour, 1.3))
+                q.drawLines([QLineF(float(xs[i]), float(ys[i]), float(xs[i + 1]), float(ys[i + 1]))
                              for i in np.nonzero(seg == b)[0]])
-        p.restore()
 
     def _paint_markers(self, p: QPainter, f: SpectrumFrame, w: int, h: int) -> None:
         if self._passband is not None:
@@ -516,7 +580,8 @@ class SpectrumView(QWidget):
             x1, x2 = self._x_of(f.center_hz + lo), self._x_of(f.center_hz + hi)
             band = QColor("#f0a830")
             band.setAlpha(45)
-            band_h = self._plot_h() + AXIS_H + PLAN_H if self._wf3d else h      # perspective: no flat band over it
+            # in a 3D style the flat passband band covers only the trace and axis, not the perspective picture
+            band_h = self._plot_h() + AXIS_H + PLAN_H if self._wf_style != "2d" else h
             p.fillRect(QRectF(x1, 0, max(2.0, x2 - x1), band_h), band)
         p.setPen(QPen(QColor("#f0a830"), 1.4))
         p.drawLine(int(w / 2), 0, int(w / 2), h)

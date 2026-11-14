@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- View > 3D waterfall: a perspective waterfall (newest spectrum in front, older ones stacked behind as coloured ridges). It works with the zoom and the colour schemes; the 2D waterfall stays the default.
+- View > Waterfall style: flat (default), 3D tilted plane or 3D ridges. The 3D pictures are cached and redrawn at most 5-10 times a second so they do not slow the window or make the audio break up.
 
 ## 0.3.2
 

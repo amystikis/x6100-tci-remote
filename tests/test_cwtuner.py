@@ -157,18 +157,28 @@ def test_reading_is_steady_and_bars_hold():
     assert v._cw_hold.max() > 0.8 * peak                                 # bars fall slowly, not instantly
 
 
-def test_3d_waterfall_paints_and_follows_zoom():
+def test_3d_waterfall_styles_paint_and_follow_zoom():
     from PySide6.QtWidgets import QApplication
 
-    from x6100_remote.gui.spectrum_view import SpectrumView
+    from x6100_remote.gui.spectrum_view import WF_STYLES, SpectrumView
     QApplication.instance() or QApplication([])
     v = SpectrumView(rows=60)
     v.resize(800, 500)
     for i in range(30):
         v.push(frame_with({60.0: 60}, seed=i))
-    v.set_waterfall_3d(True)
-    img = v.grab().toImage()
-    v.set_zoom(4)
+    for style in WF_STYLES:
+        v.set_waterfall_style(style)
+        assert v._wf_style == style
+        v.grab()
+        v.set_zoom(4)
+        v.grab()
+        v.set_zoom(1)
+    v.set_waterfall_style("plane")
     v.grab()
-    v.set_waterfall_3d(False)
-    assert img.width() == 800 and v._wf3d is False
+    assert v._wf3d_img is not None and v._wf3d_img.width() == 800
+    img, t = v._wf3d_img, v._wf3d_t
+    v.push(frame_with({60.0: 60}, seed=99))
+    v.grab()                                                             # inside the redraw interval: cache is reused
+    assert v._wf3d_img is img and v._wf3d_t == t
+    v.set_waterfall_style("nonsense")
+    assert v._wf_style == "2d"
