@@ -20,6 +20,10 @@ from .spectrum import SpectrumFrame
 
 MIN_STRENGTH = 10.0           # peak above the median of the window, raw bin units, to count as a signal
 ALIGNED_HZ = 20.0             # |offset| within this: "on the line"
+SMOOTH_ALPHA = 0.1            # weight of each new frame in the offset average (lower: steadier, slower to follow)
+HOLD_S = 2.0                  # keep showing the last reading this long after the signal drops (keyed CW has gaps)
+SHOWN_EVERY_S = 0.3           # the readout is refreshed at most this often so the digits are readable
+BAR_FALL_PER_S = 0.5          # peak-hold bars fall by this fraction of full scale per second
 
 
 @dataclass

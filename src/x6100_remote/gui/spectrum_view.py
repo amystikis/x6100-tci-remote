@@ -1,12 +1,15 @@
 """Spectrum trace + scrolling waterfall. Click to tune, mouse wheel to step."""
 from __future__ import annotations
 
+import time
+
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
-from ..cwtuner import CwTune, analyze, smooth, window_half_width, window_levels
+from ..cwtuner import (BAR_FALL_PER_S, HOLD_S, SHOWN_EVERY_S, SMOOTH_ALPHA, CwTune, analyze, smooth,
+                       window_half_width, window_levels)
 from ..panelinfo import PLAN_CW, PLAN_DIGITAL, PLAN_PHONE, PlanSegment, Spot
 from ..spectrum import SpectrumFrame
 
@@ -105,7 +108,12 @@ class SpectrumView(QWidget):
         self.show_spots = True
         self.show_cw_tuner = True
         self._cw_bw: int | None = None                # passband width (Hz) while in CW/CW-R, else None
-        self._cw_tune: CwTune | None = None
+        self._cw_tune: CwTune | None = None           # smoothed reading (held for HOLD_S after the signal drops)
+        self._cw_seen = 0.0                           # monotonic time of the last frame that had a signal
+        self._cw_shown: CwTune | None = None          # what the readout shows (refreshed a few times per second)
+        self._cw_shown_t = 0.0
+        self._cw_hold: np.ndarray | None = None       # peak-hold bar heights
+        self._cw_hold_t = 0.0
         self._cw_target = 0.0
         self._spot_boxes: list[tuple[QRectF, Spot]] = []
 
@@ -135,6 +143,8 @@ class SpectrumView(QWidget):
         self._cw_target = float(target_hz)
         self._cw_tune = (analyze(self._frame, bandwidth_hz, target_hz=self._cw_target)
                          if (bandwidth_hz and self._frame) else None)
+        self._cw_seen = time.monotonic()
+        self._cw_shown, self._cw_hold = self._cw_tune, None
         self.update()
 
     def set_zoom(self, zoom: int) -> None:
@@ -189,10 +199,24 @@ class SpectrumView(QWidget):
         self._wf[0] = self._lut[lv]
         self._wl[0] = lv
         self._level, self._frame = level, frame
-        self._cw_tune = (smooth(self._cw_tune, analyze(frame, self._cw_bw, target_hz=self._cw_target), self._cw_bw)
-                         if self._cw_bw else None)
+        self._track_cw(frame)
         self.frames += 1
         self.update()
+
+    def _track_cw(self, frame: SpectrumFrame) -> None:
+        """Steady CW tuner reading: heavy smoothing, and the last reading is held while keyed CW is between elements."""
+        if not self._cw_bw:
+            self._cw_tune = self._cw_shown = None
+            return
+        now = time.monotonic()
+        raw = analyze(frame, self._cw_bw, target_hz=self._cw_target)
+        if raw is not None:
+            self._cw_tune = smooth(self._cw_tune, raw, self._cw_bw, alpha=SMOOTH_ALPHA)
+            self._cw_seen = now
+        elif now - self._cw_seen > HOLD_S:
+            self._cw_tune = None
+        if now - self._cw_shown_t >= SHOWN_EVERY_S or (self._cw_tune is None) != (self._cw_shown is None):
+            self._cw_shown, self._cw_shown_t = self._cw_tune, now
 
     def _shift_waterfall(self, old: SpectrumFrame, new: SpectrumFrame) -> None:
         """The radio re-centres on the VFO: slide the history so signals stay where they are."""
@@ -394,8 +418,16 @@ class SpectrumView(QWidget):
         x0, x1 = rect.left(), rect.right()
         p.fillRect(rect, QColor(5, 10, 20, 190))
         levels = np.clip(window_levels(f, half, n, values=self._level, centre_hz=self._cw_target), 0.0, 1.0)
+        now = time.monotonic()
+        if self._cw_hold is None or len(self._cw_hold) != n:
+            self._cw_hold = levels.copy()
+        else:                                                      # peak hold: jump up at once, fall slowly
+            fall = BAR_FALL_PER_S * min(0.5, now - self._cw_hold_t)
+            self._cw_hold = np.maximum(levels, self._cw_hold - fall)
+        self._cw_hold_t = now
+        levels = self._cw_hold
         bar_w = (x1 - x0) / n
-        tune = self._cw_tune
+        tune = self._cw_shown
         peak_i = None
         if tune is not None and abs(tune.offset_hz) < half:
             peak_i = min(n - 1, max(0, int((tune.offset_hz + half) / (2 * half) * n)))

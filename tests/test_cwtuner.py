@@ -85,7 +85,11 @@ def test_widget_draws_tuner_only_when_enabled():
     assert v._cw_tune is not None and abs(v._cw_tune.offset_hz - 60) < 30
     v.grab()                                                             # paints with bars and label
     v.push(frame_with({}))
-    assert v._cw_tune is None
+    assert v._cw_tune is not None and v._cw_shown is not None            # keyed CW: the reading is held for a while
+    v.grab()
+    v._cw_seen -= 5.0                                                    # ... then dropped
+    v.push(frame_with({}))
+    assert v._cw_tune is None and v._cw_shown is None
     v.grab()                                                             # "no signal" label
     v.set_show_cw_tuner(False)
     v.set_cw_tuner(None)
@@ -131,3 +135,23 @@ def test_signal_at_the_cw_pitch_is_on_tone_and_cwr_mirrors():
     # a signal on the VFO line is NOT on tone any more when the pitch is 600
     on_line = analyze(frame_with({0.0: 60}), 500, target_hz=600)
     assert on_line is None or not on_line.aligned
+
+
+def test_reading_is_steady_and_bars_hold():
+    from PySide6.QtWidgets import QApplication
+
+    from x6100_remote.gui.spectrum_view import SpectrumView
+    QApplication.instance() or QApplication([])
+    v = SpectrumView(rows=8)
+    v.resize(800, 500)
+    v.push(frame_with({60.0: 60}))
+    v.set_cw_tuner(500)
+    shown = [v._cw_shown]
+    for i in range(20):                                                  # 20 quick frames: readout is not refreshed
+        v.push(frame_with({60.0 + (i % 2) * 40: 60}, seed=i))            # each frame (rate limited), so it holds still
+    assert v._cw_shown is shown[0] or abs(v._cw_shown.offset_hz - shown[0].offset_hz) < 40
+    v.grab()
+    peak = v._cw_hold.max()
+    v.push(frame_with({}))
+    v.grab()
+    assert v._cw_hold.max() > 0.8 * peak                                 # bars fall slowly, not instantly

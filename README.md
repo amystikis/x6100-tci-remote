@@ -71,9 +71,15 @@ The app also connects to the radio's panel server (port 50002, the same server a
 Click the spectrum to tune, scroll the wheel to step. The orange band is the receive passband. Level scaling is
 automatic (the radio's bin values are not calibrated). Hide it with View > Spectrum & waterfall.
 
+- **Zoom** (1x, 2x, 4x, 8x, next to the frequency step) shows the middle part of the radio's 100 kHz span. It is a display
+  zoom only (the panel protocol has no span command), so the resolution does not get finer.
+- **Colours**: Settings > Settings... > Display picks the waterfall colour scheme and the spectrum trace colour.
+- The radio address and **Connect** live in Settings > Connection; the connection status is at the bottom of the
+  window and a **UTC clock** is at the top right.
+
 ### Extras from the panel server
 
-- **Band plan** as a coloured strip under the frequency axis (blue CW, purple digital, green phone, grey other).
+- **Band plan** as a labelled coloured strip under the frequency axis (blue CW, purple digital, green ALL MODES / SSB, grey other).
 - **DX spots** (the radio's cluster feed) as call-sign labels on the spectrum: click one to tune to its exact
   frequency, hover for comment and spotter. Toggle in View > DX spots on spectrum.
 - **Radio status strip**: preamp, attenuator, NB, NR, squelch, RF gain, power, tuner, battery, FT8 app open (read-only).
@@ -96,8 +102,12 @@ carrier and the signal is heard at the pitch. The pitch is the radio's own setti
 700 Hz). In CW and CW-R the receive passband is drawn there, and a row of vertical bars (the spectrum around that point)
 sits at the top-left of the VFO line, with the strongest signal highlighted (green when on tone, orange inside the
 passband, red outside) and its offset from the tone in Hz beside the meter. Tune until the offset is near 0. The offset
-is an estimate from the radio's spectrum bins (about 98 Hz per bin at the 100 kHz span), smoothed over frames: expect an
-accuracy of a few tens of Hz. Switch it off in View > CW tuner indicator.
+is an estimate from the radio's spectrum bins (about 98 Hz per bin at the 100 kHz span): expect an accuracy of a few tens
+of Hz.
+
+The display is built to be readable on keyed CW, not just fast: the offset is averaged over many frames, the number is
+refreshed about three times a second, the last reading is held for 2 seconds when the signal pauses between elements
+(then it shows "no signal"), and the bars are peak-held and fall slowly. Switch it off in View > CW tuner indicator.
 
 ## PTT from an OS keyboard shortcut
 
