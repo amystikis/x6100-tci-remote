@@ -125,4 +125,4 @@ ruff check .
 
 ## License
 
-MIT
+LGPL-2.1-or-later (see [LICENSE](LICENSE)).

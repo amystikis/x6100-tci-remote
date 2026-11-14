@@ -8,7 +8,8 @@ version = "0.2.3"
 description = "Independent desktop remote controller for the Xiegu X6100 (OpenX6X00) over TCI"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { text = "LGPL-2.1-or-later" }
+classifiers = ["License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)"]
 dependencies = ["websockets>=13", "numpy>=1.24"]
 
 [project.optional-dependencies]

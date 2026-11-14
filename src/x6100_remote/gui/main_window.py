@@ -338,7 +338,7 @@ class MainWindow(QMainWindow):
         h = self.menuBar().addMenu("&Help")
         about = QAction("About", self)
         about.triggered.connect(lambda: self.statusBar().showMessage(
-            "X6100 TCI Remote %s - MIT licensed, talks Expert Electronics TCI" % __version__, 6000))
+            "X6100 TCI Remote %s - LGPL-2.1-or-later licensed, talks Expert Electronics TCI" % __version__, 6000))
         h.addAction(about)
 
         # watchdog + wiring -------------------------------------------------------------

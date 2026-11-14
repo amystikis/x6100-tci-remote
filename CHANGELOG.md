@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Relicensed from MIT to LGPL-2.1-or-later.
+
 ## 0.2.3
 
 - The window now fits on 1920x1080 screens: tighter group-box padding, a smaller spectrum-view minimum, and an
