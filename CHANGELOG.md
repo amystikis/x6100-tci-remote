@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- View > Waterfall style: flat (default) or 3D, modelled on the radio's own 3D waterfall (perspective box, ridges, noise floor removed per line). The 3D picture is cached and redrawn at most about 8 times a second so it does not slow the window or make the audio break up.
+- View > Waterfall style: flat (default) or 3D, modelled on the radio's own 3D waterfall (perspective box, ridges, noise floor removed per line). The 3D picture is cached and redrawn at most about 6 times a second so it does not slow the window or make the audio break up.
 
 ## 0.3.2
 

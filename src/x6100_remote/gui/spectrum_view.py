@@ -47,7 +47,7 @@ WF_STYLES = {"2d": "Flat (2D)", "3d": "3D (like the radio)"}
 WF3D_RIDGES = 40                # history lines drawn in the 3D style
 WF3D_STEP = 3                   # waterfall rows between two lines (rows arrive one per spectrum frame)
 WF3D_FLOOR_MARGIN = 0.12        # 3D: signals must stand this far (0..1) above the row's own noise floor to be drawn
-WF3D_MIN_INTERVAL = 0.12        # seconds: the 3D picture is redrawn at most this often (it is the costly part); the
+WF3D_MIN_INTERVAL = 0.15        # seconds: the 3D picture is redrawn at most this often (it is the costly part); the
                                 # cached picture is reused in between so the window, audio and tuning stay responsive
 
 
@@ -509,10 +509,10 @@ class SpectrumView(QWidget):
 
     def _draw_3d(self, q: QPainter, w: int, height: int) -> None:
         """Like the radio's own 3D waterfall: a box in perspective (grid floor and back wall) with the recent spectra
-        stacked in it as ridges and the live spectrum in front. Each line is drawn relative to its own noise floor, so only
-        signals stand up and the noise stays flat (the radio calls that auto level)."""
+        stacked in it as ridges and the live spectrum in front. Each line is drawn relative to its own noise floor,
+        so only signals stand up and the noise stays flat (the radio calls that auto level)."""
         rows = self._wl.shape[0]
-        npts = max(80, min(260, w // 3))
+        npts = max(80, min(200, w // 4))
         rel = np.linspace(-0.5, 0.5, npts)
         count = max(2, min(WF3D_RIDGES, (rows - 1) // WF3D_STEP + 1))
         front, depth, amp_front = height * 0.93, height * 0.55, height * 0.40
