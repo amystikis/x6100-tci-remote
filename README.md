@@ -8,7 +8,7 @@ audio, read the S-meter, see a **spectrum and waterfall** (click to tune), and (
 
 ## Status
 
-- **Version 0.3.2.** The author has tested it against a real X6100 (OpenX6X00 firmware; the X6200 is expected to work the same way but has not been tested): tuning and mode, spectrum and
+- **Version 0.3.3.** The author has tested it against a real X6100 (OpenX6X00 firmware; the X6200 is expected to work the same way but has not been tested): tuning and mode, spectrum and
   waterfall, pairing, the radio key buttons, the CW decoder text and the CW tuner indicator all work.
 - Automated tests run against a **fake radio** included in this repo (`x6100-tci-remote --demo`).
 - **Transmit is experimental.** Test only into a dummy load.

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.3
 
 - Waterfall noise floor: Settings > Display has an auto noise floor (on by default; the waterfall follows the noise floor and only signals light up), a noise-floor trim slider, a contrast slider and a reset button. They are remembered.
 
