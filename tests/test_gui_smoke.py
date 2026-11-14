@@ -166,8 +166,8 @@ def test_key_buttons_need_pairing_and_atu_tune_needs_tx_enable(env):
     from PySide6.QtWidgets import QInputDialog
     QInputDialog.getText = staticmethod(lambda *a, **k: ("123456", True))
     win.pair_panel()                                                       # real flow: pair? then the typed code
-    pump(lambda: any(m.startswith("pair 123456") for m in panel.log))
-    assert panel.log.index("pair?") < [i for i, m in enumerate(panel.log) if m.startswith("pair 123456")][-1]
+    pump(lambda: "pair?" in panel.log                                       # the code request, then a pair message after it
+         and any(m.startswith("pair 123456") for m in panel.log[panel.log.index("pair?"):]))
     pump(lambda: win.w.info.role == "operate" and win.pair_btn.isHidden())
     pump(lambda: "Paired as operate" in win.statusBar().currentMessage())
     pre_before = panel.pre
