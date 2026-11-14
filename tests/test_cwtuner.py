@@ -173,7 +173,8 @@ def test_3d_waterfall_styles_paint_and_follow_zoom():
         v.set_zoom(4)
         v.grab()
         v.set_zoom(1)
-    v.set_waterfall_style("plane")
+    v.set_waterfall_style("ridges")                                      # an older saved name maps to the 3D style
+    assert v._wf_style == "3d"
     v.grab()
     assert v._wf3d_img is not None and v._wf3d_img.width() == 800
     img, t = v._wf3d_img, v._wf3d_t

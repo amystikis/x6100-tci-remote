@@ -4,9 +4,8 @@ from __future__ import annotations
 import time
 
 import numpy as np
-from PySide6.QtCore import QLineF, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import (QColor, QFont, QFontMetricsF, QImage, QLinearGradient, QPainter, QPen, QPolygonF,
-                           QTransform)
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from ..cwtuner import (BAR_FALL_PER_S, HOLD_S, SHOWN_EVERY_S, SMOOTH_ALPHA, CwTune, analyze, smooth,
@@ -44,12 +43,12 @@ SPECTRUM_SCHEMES: dict[str, str] = {                                   # trace c
 DEFAULT_WATERFALL = "Classic"
 DEFAULT_SPECTRUM = "Green"
 ZOOM_LEVELS = (1, 2, 4, 8)
-WF_STYLES = {"2d": "Flat (2D)", "plane": "3D tilted plane", "ridges": "3D ridges"}
-WF3D_RIDGES = 24                # number of history lines drawn in the ridges style
-WF3D_STEP = 4                   # waterfall rows between two ridges (rows arrive one per spectrum frame)
-WF3D_MIN_INTERVAL = {"plane": 0.10, "ridges": 0.20}   # seconds: the 3D picture is redrawn at most this often (it is
-                                # the costly part); the cached picture is reused in between so the window, audio and
-                                # tuning stay responsive
+WF_STYLES = {"2d": "Flat (2D)", "3d": "3D (like the radio)"}
+WF3D_RIDGES = 40                # history lines drawn in the 3D style
+WF3D_STEP = 3                   # waterfall rows between two lines (rows arrive one per spectrum frame)
+WF3D_FLOOR_MARGIN = 0.12        # 3D: signals must stand this far (0..1) above the row's own noise floor to be drawn
+WF3D_MIN_INTERVAL = 0.12        # seconds: the 3D picture is redrawn at most this often (it is the costly part); the
+                                # cached picture is reused in between so the window, audio and tuning stay responsive
 
 
 def make_lut(scheme: str = DEFAULT_WATERFALL) -> np.ndarray:
@@ -165,6 +164,7 @@ class SpectrumView(QWidget):
         self.update()
 
     def set_waterfall_style(self, style: str) -> None:
+        style = "3d" if style in ("plane", "ridges") else style           # names from older versions
         self._wf_style = style if style in WF_STYLES else "2d"
         self._wf3d_key = None
         self.update()
@@ -492,15 +492,12 @@ class SpectrumView(QWidget):
             return
         now = time.monotonic()
         key = (w, height, self._zoom, self._wf_style, self.frames > 0)
-        stale = self._wf3d_frames != self.frames and now - self._wf3d_t >= WF3D_MIN_INTERVAL[self._wf_style]
+        stale = self._wf3d_frames != self.frames and now - self._wf3d_t >= WF3D_MIN_INTERVAL
         if self._wf3d_img is None or key != self._wf3d_key or stale:
             img = QImage(w, height, QImage.Format.Format_ARGB32_Premultiplied)
             img.fill(QColor("#050a14"))
             q = QPainter(img)
-            if self._wf_style == "plane":
-                self._draw_plane(q, w, height)
-            else:
-                self._draw_ridges(q, w, height)
+            self._draw_3d(q, w, height)
             q.end()
             self._wf3d_img, self._wf3d_key, self._wf3d_t, self._wf3d_frames = img, key, now, self.frames
         p.drawImage(0, top, self._wf3d_img)
@@ -510,69 +507,63 @@ class SpectrumView(QWidget):
         pos = (n - 1) / 2 + np.linspace(-0.5, 0.5, npts) * (n - 1) / self._zoom       # the part of the span in view
         return np.interp(pos, np.arange(n), row.astype(np.float64)) / scale
 
-    def _draw_plane(self, q: QPainter, w: int, height: int) -> None:
-        """The flat waterfall laid down in perspective: newest at the front, older fading into the distance, with the
-        live spectrum standing up along the front edge."""
-        rows, n = self._wf.shape
-        vis = n / self._zoom
-        far = 0.30                                                      # the far edge is 30 % as wide as the front
-        y_far = height * 0.04
-        y_front = height * 0.94
-        src = QPolygonF([QPointF((n - vis) / 2, 0), QPointF((n + vis) / 2, 0),
-                         QPointF((n + vis) / 2, rows), QPointF((n - vis) / 2, rows)])
-        dst = QPolygonF([QPointF(0, y_front), QPointF(w, y_front),
-                         QPointF(w / 2 + w * (1 - far) / 2, y_far), QPointF(w / 2 - w * (1 - far) / 2, y_far)])
-        tr = QTransform.quadToQuad(src, dst)
-        if tr is not None:
-            q.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-            q.setTransform(tr)
-            img = QImage(self._wf.data, n, rows, n * 4, QImage.Format.Format_ARGB32)
-            q.drawImage(QRectF((n - vis) / 2, 0, vis, rows), img, QRectF((n - vis) / 2, 0, vis, rows))
-            q.resetTransform()
-        fade = QLinearGradient(0, y_far, 0, y_front)                    # distance haze
-        fade.setColorAt(0.0, QColor(5, 10, 20, 255))
-        fade.setColorAt(0.75, QColor(5, 10, 20, 0))
-        q.fillRect(QRectF(0, 0, w, y_front), fade)
-        if self._level is not None:                                     # live spectrum along the front edge
-            lv = self._visible_levels(self._level, max(60, min(400, w // 2)), 1.0)       # already 0..1
-            xs = np.linspace(0, w, len(lv))
-            ys = y_front - lv * height * 0.28
-            pts = [QPointF(float(x), float(y)) for x, y in zip(xs, ys, strict=True)]
-            fill = QColor(self._trace_color)
-            fill.setAlpha(70)
-            q.setPen(Qt.PenStyle.NoPen)
-            q.setBrush(fill)
-            q.drawPolygon(QPolygonF([QPointF(0, y_front), *pts, QPointF(w, y_front)]))
-            q.setBrush(Qt.BrushStyle.NoBrush)
-            q.setPen(QPen(self._trace_color, 1.4))
-            q.drawPolyline(QPolygonF(pts))
-
-    def _draw_ridges(self, q: QPainter, w: int, height: int) -> None:
-        """Recent spectra stacked in perspective as ridges (height = level, colour = waterfall scheme)."""
+    def _draw_3d(self, q: QPainter, w: int, height: int) -> None:
+        """Like the radio's own 3D waterfall: a box in perspective (grid floor and back wall) with the recent spectra
+        stacked in it as ridges and the live spectrum in front. Each line is drawn relative to its own noise floor, so only
+        signals stand up and the noise stays flat (the radio calls that auto level)."""
         rows = self._wl.shape[0]
-        npts = max(60, min(110, w // 8))
+        npts = max(80, min(260, w // 3))
         rel = np.linspace(-0.5, 0.5, npts)
         count = max(2, min(WF3D_RIDGES, (rows - 1) // WF3D_STEP + 1))
-        front, depth, amp_front = height * 0.96, height * 0.60, height * 0.36
+        front, depth, amp_front = height * 0.93, height * 0.55, height * 0.40
+        shrink, rise = 0.36, 0.45                                       # far edge is 36 % narrower; ridges 45 % lower
+        # grid: back wall, side edges and floor lines
+        grid = QPen(QColor("#1a2438"), 1)
+        q.setPen(grid)
+        top = front - depth
+        bx0, bx1 = w * shrink / 2, w * (1 - shrink / 2)
+        q.drawRect(QRectF(bx0, top - amp_front * (1 - rise) * 1.15, bx1 - bx0, amp_front * (1 - rise) * 1.15))
+        for frac in (0.33, 0.66):                                       # back-wall height lines
+            y = top - amp_front * (1 - rise) * 1.15 * frac
+            q.drawLine(QPointF(bx0, y), QPointF(bx1, y))
+        q.drawLine(QPointF(0, front), QPointF(bx0, top))                # floor edges running to the back
+        q.drawLine(QPointF(w, front), QPointF(bx1, top))
+        q.drawLine(QPointF(0, front), QPointF(bx0, top - amp_front * (1 - rise) * 1.15))   # side walls
+        q.drawLine(QPointF(w, front), QPointF(bx1, top - amp_front * (1 - rise) * 1.15))
+        for k in range(1, 5):                                           # floor lines across
+            tt = k / 5
+            xl, xr = w * shrink / 2 * tt, w - w * shrink / 2 * tt
+            q.drawLine(QPointF(xl, front - tt * depth), QPointF(xr, front - tt * depth))
+        q.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         for k in range(count - 1, -1, -1):                              # far to near, so near ridges cover far ones
-            t = k / (count - 1)
-            lv = self._visible_levels(self._wl[k * WF3D_STEP], npts)
-            base = front - t * depth
-            xs = w / 2 + rel * w * (1.0 - 0.38 * t)
-            ys = base - lv * amp_front * (1.0 - 0.45 * t)
-            pts = [QPointF(float(x), float(y)) for x, y in zip(xs, ys, strict=True)]
-            q.setPen(Qt.PenStyle.NoPen)
-            q.setBrush(QColor(6, 12, 24, 255))
-            q.drawPolygon(QPolygonF([QPointF(xs[0], base + 5), *pts, QPointF(xs[-1], base + 5)]))
-            ci = np.clip(40 + lv * 215, 0, 255).astype(int)
-            seg = (ci[:-1] + ci[1:]) // 2 >> 5                            # 8 colour buckets along the ridge
-            alpha = int(255 - 110 * t)
-            for b in np.unique(seg):
-                colour = QColor.fromRgb(int(self._lut[int(b) * 32 + 16]))
-                colour.setAlpha(alpha)
-                q.setPen(QPen(colour, 1.3))
-                q.drawLines([QLineF(float(xs[i]), float(ys[i]), float(xs[i + 1]), float(ys[i + 1]))
-                             for i in np.nonzero(seg == b)[0]])
+            tt = k / (count - 1)
+            row = self._wl[k * WF3D_STEP]
+            floor = float(np.median(row)) / 255.0 + WF3D_FLOOR_MARGIN
+            lv = np.clip((self._visible_levels(row, npts) - floor) / max(0.2, 1.0 - floor), 0.0, 1.0) ** 0.85
+            base = front - tt * depth
+            xs = w / 2 + rel * w * (1.0 - shrink * tt)
+            ys = base - lv * amp_front * (1.0 - rise * tt)
+            alpha = int(255 - 90 * tt)
+            up = np.flatnonzero(lv > 0)
+            if up.size:
+                runs = np.split(up, np.flatnonzero(np.diff(up) > 1) + 1)         # stretches of signal above the floor
+                for run in runs:
+                    a, b = max(0, run[0] - 1), min(npts - 1, run[-1] + 1)
+                    pts = [QPointF(float(xs[i]), float(ys[i])) for i in range(a, b + 1)]
+                    peak = float(lv[a:b + 1].max())
+                    colour = QColor.fromRgb(int(self._lut[int(60 + peak * 195)]))
+                    fill = QColor(colour)
+                    fill.setAlpha(int(alpha * 0.55))
+                    q.setPen(Qt.PenStyle.NoPen)
+                    q.setBrush(fill)
+                    q.drawPolygon(QPolygonF([QPointF(xs[a], base), *pts, QPointF(xs[b], base)]))
+                    colour.setAlpha(alpha)
+                    q.setPen(QPen(colour.lighter(130), 1.2))
+                    q.setBrush(Qt.BrushStyle.NoBrush)
+                    q.drawPolyline(QPolygonF(pts))
+            if k == 0:                                                  # the live line in front: red baseline
+                q.setPen(QPen(QColor("#ff3b2f"), 1.6))
+                q.drawLine(QPointF(0, base), QPointF(w, base))
 
     def _paint_markers(self, p: QPainter, f: SpectrumFrame, w: int, h: int) -> None:
         if self._passband is not None:
@@ -580,9 +571,7 @@ class SpectrumView(QWidget):
             x1, x2 = self._x_of(f.center_hz + lo), self._x_of(f.center_hz + hi)
             band = QColor("#f0a830")
             band.setAlpha(45)
-            # in a 3D style the flat passband band covers only the trace and axis, not the perspective picture
-            band_h = self._plot_h() + AXIS_H + PLAN_H if self._wf_style != "2d" else h
-            p.fillRect(QRectF(x1, 0, max(2.0, x2 - x1), band_h), band)
+            p.fillRect(QRectF(x1, 0, max(2.0, x2 - x1), h), band)
         p.setPen(QPen(QColor("#f0a830"), 1.4))
         p.drawLine(int(w / 2), 0, int(w / 2), h)
         if self._hover is not None:
