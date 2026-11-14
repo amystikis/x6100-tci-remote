@@ -77,10 +77,6 @@ automatic (the radio's bin values are not calibrated). Hide it with View > Spect
 
 - **Zoom** (1x, 2x, 4x, 8x, next to the frequency step; always starts at 1x) shows the middle part of the radio's 100 kHz span. It is a display
   zoom only (the panel protocol has no span command), so the resolution does not get finer.
-- **Waterfall style**: View > Waterfall style: the flat waterfall (default) or **3D (like the radio)**, the style of the
-  radio's own 3D waterfall: a perspective box with the recent spectra stacked as ridges, the live spectrum in front, and
-  each line drawn relative to its own noise floor so only signals stand up. It follows the zoom and the colour scheme,
-  and is redrawn at most about 6 times a second to keep the window and audio smooth.
 - **Colours**: Settings > Settings... > Display picks the waterfall colour scheme and the spectrum trace colour.
 - The radio address and **Connect** live in Settings > Connection; the connection status is at the bottom of the
   window and a **UTC clock** is at the top right.

@@ -1,9 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- View > Waterfall style: flat (default) or 3D, modelled on the radio's own 3D waterfall (perspective box, ridges, noise floor removed per line). The 3D picture is cached and redrawn at most about 6 times a second so it does not slow the window or make the audio break up.
-
 ## 0.3.2
 
 - The app connects automatically at start-up to the radio used last time (when its saved address is valid); a radio address given on the command line still wins. The zoom always starts at 1x.
