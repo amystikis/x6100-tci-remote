@@ -25,6 +25,21 @@ pip install -e ".[gui]"          # or: pipx install ".[gui]"
 
 On Debian/Ubuntu, Qt may need `sudo apt install libxcb-cursor0` (error "could not load the Qt platform plugin xcb").
 
+### Windows
+
+The code is cross-platform (Qt, websockets, numpy), so it also runs on Windows 10/11 with Python 3.10+:
+
+```powershell
+py -m venv .venv; .venv\Scripts\Activate.ps1
+pip install ".[gui]"
+x6100-tci-remote-gui 192.168.0.150
+```
+
+To build a standalone folder/zip (no Python needed on the target machine): `powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1`
+(writes `build\x6100-tci-remote_<version>_windows.zip`; unzip and run `x6100-tci-remote.exe`). The remote-PTT command
+(`x6100-tci-remote.exe --ptt toggle`) works from a shortcut or hotkey tool such as AutoHotkey; the windowed exe prints
+no text, so check its exit code (0 = ok). The Windows build is new and has not yet been tested against a real radio.
+
 ### Debian package
 
 Build and install a `.deb` (Debian, Ubuntu, Mint, Raspberry Pi OS):

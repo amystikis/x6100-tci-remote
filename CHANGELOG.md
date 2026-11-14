@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Windows: install instructions, a PyInstaller build script (`packaging/build_windows.ps1`) and a Windows CI job that runs the tests and builds the zip.
 - Relicensed from MIT to LGPL-2.1-or-later.
 
 ## 0.2.3
