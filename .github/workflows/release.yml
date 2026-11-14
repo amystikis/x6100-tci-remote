@@ -45,8 +45,13 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: powershell -ExecutionPolicy Bypass -File packaging/build_windows.ps1
+      - run: powershell -ExecutionPolicy Bypass -File packaging/build_msi.ps1
       - uses: actions/upload-artifact@v4
-        with: { name: windows, path: "build/*_windows.zip" }
+        with:
+          name: windows
+          path: |
+            build/*_windows.zip
+            build/*_windows.msi
 
   publish:
     needs: [check, deb, windows]

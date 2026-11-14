@@ -35,8 +35,10 @@ pip install ".[gui]"
 x6100-tci-remote-gui 192.168.0.150
 ```
 
-To build a standalone folder/zip (no Python needed on the target machine): `powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1`
-(writes `build\x6100-tci-remote_<version>_windows.zip`; unzip and run `x6100-tci-remote.exe`). The remote-PTT command
+The easiest way is the **installer**: download `x6100-tci-remote_<version>_windows.msi` from the GitHub release and run it. It installs to Program Files, adds a Start menu entry and a desktop shortcut, and a newer installer upgrades the old version in place. (The `.zip` is a portable copy: unzip and run `x6100-tci-remote.exe`.)
+
+To build the standalone folder, zip and installer yourself (no Python needed on the target machine): `powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1`
+(writes `build\x6100-tci-remote_<version>_windows.zip`), then `packaging\build_msi.ps1` for the `.msi` (needs the .NET SDK; it installs WiX as a dotnet tool). The remote-PTT command
 (`x6100-tci-remote.exe --ptt toggle`) works from a shortcut or hotkey tool such as AutoHotkey; the windowed exe prints
 no text, so check its exit code (0 = ok). The Windows build is new and has not yet been tested against a real radio.
 

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WiX v5 source for the Windows installer. Built by packaging/build_msi.ps1 (needs dist\x6100-tci-remote from
+     build_windows.ps1). The whole PyInstaller folder is installed to Program Files, with Start menu and desktop
+     shortcuts. A newer MSI upgrades an older one in place. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="X6100 TCI Remote" Manufacturer="Apostolis Mystikis (M7SVA)" Version="$(Version)"
+           UpgradeCode="5ddbcdec-b13b-4331-82ca-50af039747ad" Scope="perMachine" Compressed="yes">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of X6100 TCI Remote is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="AppIcon.ico" SourceFile="$(IconFile)" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/amystikis/x6100-tci-remote" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="X6100 TCI Remote">
+        <Files Include="$(SourceDir)\**" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="*">
+        <Shortcut Id="StartMenuLink" Name="X6100 TCI Remote" Description="Remote controller for the Xiegu X6100 and X6200 (OpenX6X00)"
+                  Target="[INSTALLFOLDER]x6100-tci-remote.exe" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" />
+        <RegistryValue Root="HKCU" Key="Software\X6100TciRemote" Name="start_menu" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="*">
+        <Shortcut Id="DesktopLink" Name="X6100 TCI Remote" Description="Remote controller for the Xiegu X6100 and X6200 (OpenX6X00)"
+                  Target="[INSTALLFOLDER]x6100-tci-remote.exe" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" />
+        <RegistryValue Root="HKCU" Key="Software\X6100TciRemote" Name="desktop" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+  </Package>
+</Wix>

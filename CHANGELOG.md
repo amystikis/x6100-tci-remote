@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Windows: an `.msi` installer (Program Files, Start menu and desktop shortcuts, in-place upgrades) built next to the zip, and an application icon for the exe.
+
 ## 0.3.1
 
 - Descriptions (About, README, `.deb`, app menu entry) now say the Xiegu X6100 and X6200.

@@ -46,7 +46,10 @@ jobs:
       - run: pip install -e ".[gui,dev]"
       - run: pytest -q
       - run: powershell -ExecutionPolicy Bypass -File packaging/build_windows.ps1
+      - run: powershell -ExecutionPolicy Bypass -File packaging/build_msi.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: build/*_windows.zip
+          path: |
+            build/*_windows.zip
+            build/*_windows.msi
