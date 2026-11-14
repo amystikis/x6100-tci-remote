@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.2
 
+- The app connects automatically at start-up to the radio used last time (when its saved address is valid); a radio address given on the command line still wins. The zoom always starts at 1x.
 - Windows: an `.msi` installer (Program Files, Start menu and desktop shortcuts, in-place upgrades) built next to the zip, and an application icon for the exe.
 
 ## 0.3.1
@@ -14,7 +15,7 @@
 
 - `.deb`: real maintainer (Apostolis Mystikis, M7SVA), homepage and a fuller description.
 - Windows: install instructions, a PyInstaller build script (`packaging/build_windows.ps1`) and a Windows CI job that runs the tests and builds the zip.
-- Spectrum and waterfall zoom (1x, 2x, 4x, 8x) next to the frequency step. It is a display zoom of the middle of the radio's 100 kHz span (the panel protocol has no span command), so the resolution does not improve; the choice is remembered.
+- Spectrum and waterfall zoom (1x, 2x, 4x, 8x) next to the frequency step. It is a display zoom of the middle of the radio's 100 kHz span (the panel protocol has no span command), so the resolution does not improve.
 - New Settings dialog (Settings > Settings...) with a Display tab: 6 waterfall colour schemes and 5 spectrum trace colours, applied immediately and remembered.
 - The radio address and Connect button moved to Settings > Connection; the connection status is now shown at the bottom of the window. A UTC clock (amber, like the frequency) sits at the top right.
 - Help > About is now a dialog: it states that the app works only with the OpenX6X00 firmware (https://openx6x00.org/) and credits RF.Guru (Joeri Van Dooren ON6URE) and everyone contributing to that open-source firmware.

@@ -49,6 +49,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.address:
         win.addr.setEditText(args.address)
         win.toggle_connection()
+    else:
+        win.auto_connect_last()                    # reconnect to the radio used last time (if its address is valid)
     return app.exec()
 
 

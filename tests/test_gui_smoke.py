@@ -166,7 +166,7 @@ def test_key_buttons_need_pairing_and_atu_tune_needs_tx_enable(env):
     from PySide6.QtWidgets import QInputDialog
     QInputDialog.getText = staticmethod(lambda *a, **k: ("123456", True))
     win.pair_panel()                                                       # real flow: pair? then the typed code
-    pump(lambda: "pair?" in panel.log                                       # the code request, then a pair message after it
+    pump(lambda: "pair?" in panel.log                                       # code request, then a pair message after it
          and any(m.startswith("pair 123456") for m in panel.log[panel.log.index("pair?"):]))
     pump(lambda: win.w.info.role == "operate" and win.pair_btn.isHidden())
     pump(lambda: "Paired as operate" in win.statusBar().currentMessage())
@@ -338,3 +338,24 @@ def test_clock_connection_settings_and_status_bar(env):
     assert win.addr.window() is win.settings_dlg and win.connect_btn.window() is win.settings_dlg
     assert win.settings_tabs.tabText(0) == "Connection"
     assert win.status.parent() is win.statusBar()
+
+
+def test_autoconnect_to_the_last_radio_and_zoom_starts_at_1x(env):
+    from x6100_remote.gui.settings import remember_radio
+    win, _radio, pump = env
+    ok = MainWindow.valid_radio_address
+    assert ok("192.168.0.150") and ok("192.168.0.150:50001") and ok("ws://radio.local:50001/") and ok("x6100")
+    assert not ok("") and not ok("999.1.1.1") and not ok("1.2.3.4:99999") and not ok("bad host") and not ok("a..b")
+    assert win.zoom.currentData() == 1
+    _r, server = asyncio.run_coroutine_threadsafe(serve_fake(0), win.w.loop).result(5)
+    remember_radio("127.0.0.1:%d" % server.sockets[0].getsockname()[1])
+    win2 = MainWindow(TciWorker())
+    assert win2.zoom.currentData() == 1
+    assert win2.auto_connect_last()
+    pump(lambda: win2.w.state.ready)
+    win2.w.disconnect_from()
+    win2.close()
+    remember_radio("not a valid address!")
+    win3 = MainWindow(TciWorker())
+    assert not win3.auto_connect_last() and win3.connect_btn.text() == "Connect"
+    win3.close()

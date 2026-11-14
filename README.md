@@ -8,7 +8,7 @@ audio, read the S-meter, see a **spectrum and waterfall** (click to tune), and (
 
 ## Status
 
-- **Version 0.3.1.** The author has tested it against a real X6100 (OpenX6X00 firmware; the X6200 is expected to work the same way but has not been tested): tuning and mode, spectrum and
+- **Version 0.3.2.** The author has tested it against a real X6100 (OpenX6X00 firmware; the X6200 is expected to work the same way but has not been tested): tuning and mode, spectrum and
   waterfall, pairing, the radio key buttons, the CW decoder text and the CW tuner indicator all work.
 - Automated tests run against a **fake radio** included in this repo (`x6100-tci-remote --demo`).
 - **Transmit is experimental.** Test only into a dummy load.
@@ -59,6 +59,8 @@ Start the app from the application menu or run `x6100-tci-remote`.
 
 ## Run
 
+The app reconnects automatically at start-up to the radio you used last time (if its address is valid). To use another radio, give its address below or change it in Settings > Connection.
+
 ```bash
 x6100-tci-remote 192.168.0.150     # your radio's address (port defaults to 50001)
 x6100-tci-remote --demo            # no hardware: starts the built-in fake radio
@@ -73,7 +75,7 @@ The app also connects to the radio's panel server (port 50002, the same server a
 Click the spectrum to tune, scroll the wheel to step. The orange band is the receive passband. Level scaling is
 automatic (the radio's bin values are not calibrated). Hide it with View > Spectrum & waterfall.
 
-- **Zoom** (1x, 2x, 4x, 8x, next to the frequency step) shows the middle part of the radio's 100 kHz span. It is a display
+- **Zoom** (1x, 2x, 4x, 8x, next to the frequency step; always starts at 1x) shows the middle part of the radio's 100 kHz span. It is a display
   zoom only (the panel protocol has no span command), so the resolution does not get finer.
 - **Colours**: Settings > Settings... > Display picks the waterfall colour scheme and the spectrum trace colour.
 - The radio address and **Connect** live in Settings > Connection; the connection status is at the bottom of the

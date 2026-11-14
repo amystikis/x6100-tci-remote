@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import platform
+import re
 import time
 from datetime import datetime, timezone
 
@@ -150,10 +151,6 @@ class MainWindow(QMainWindow):
         self.zoom.setToolTip("Spectrum and waterfall zoom (display only; the radio's own span is not changed)")
         for z in ZOOM_LEVELS:
             self.zoom.addItem("%dx" % z, z)
-        try:
-            self.zoom.setCurrentIndex(max(0, self.zoom.findData(int(load_choice("zoom", "1")))))
-        except ValueError:
-            pass
         info.addSpacing(12)
         info.addWidget(QLabel("Zoom"))
         info.addWidget(self.zoom)
@@ -552,7 +549,6 @@ class MainWindow(QMainWindow):
         self._drive_send()
 
     def _zoom_changed(self) -> None:
-        save_choice("zoom", str(self.zoom.currentData()))
         self.spectrum.set_zoom(self.zoom.currentData())
 
     @staticmethod
@@ -740,6 +736,30 @@ class MainWindow(QMainWindow):
         super().closeEvent(e)
 
     # connection ---------------------------------------------------------------------------------
+    @staticmethod
+    def valid_radio_address(text: str) -> bool:
+        """host, host:port or a ws:// URL, where host is an IPv4 address or a hostname."""
+        t = text.strip()
+        if t.startswith(("ws://", "wss://")):
+            t = t.split("://", 1)[1].split("/", 1)[0]
+        host, sep, port = t.partition(":")
+        if sep and not (port.isdigit() and 0 < int(port) < 65536):
+            return False
+        parts = host.split(".")
+        if len(parts) == 4 and all(p.isdigit() for p in parts):
+            return all(int(p) <= 255 for p in parts)
+        label = r"[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+        return bool(re.fullmatch(label + r"(\." + label + ")*", host))
+
+    def auto_connect_last(self) -> bool:
+        """At start-up: connect to the radio used last time, if it was saved and its address is valid."""
+        radios = load_radios()
+        if not radios or not self.valid_radio_address(radios[0]):
+            return False
+        self.addr.setEditText(radios[0])
+        self.toggle_connection()
+        return True
+
     def toggle_connection(self) -> None:
         if self.connect_btn.text() == "Disconnect":
             self.w.disconnect_from()
