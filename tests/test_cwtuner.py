@@ -155,3 +155,20 @@ def test_reading_is_steady_and_bars_hold():
     v.push(frame_with({}))
     v.grab()
     assert v._cw_hold.max() > 0.8 * peak                                 # bars fall slowly, not instantly
+
+
+def test_3d_waterfall_paints_and_follows_zoom():
+    from PySide6.QtWidgets import QApplication
+
+    from x6100_remote.gui.spectrum_view import SpectrumView
+    QApplication.instance() or QApplication([])
+    v = SpectrumView(rows=60)
+    v.resize(800, 500)
+    for i in range(30):
+        v.push(frame_with({60.0: 60}, seed=i))
+    v.set_waterfall_3d(True)
+    img = v.grab().toImage()
+    v.set_zoom(4)
+    v.grab()
+    v.set_waterfall_3d(False)
+    assert img.width() == 800 and v._wf3d is False

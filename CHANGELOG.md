@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- View > 3D waterfall: a perspective waterfall (newest spectrum in front, older ones stacked behind as coloured ridges). It works with the zoom and the colour schemes; the 2D waterfall stays the default.
+
 ## 0.3.2
 
 - The app connects automatically at start-up to the radio used last time (when its saved address is valid); a radio address given on the command line still wins. The zoom always starts at 1x.

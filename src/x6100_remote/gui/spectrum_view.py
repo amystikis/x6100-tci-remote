@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QLineF, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
@@ -43,6 +43,8 @@ SPECTRUM_SCHEMES: dict[str, str] = {                                   # trace c
 DEFAULT_WATERFALL = "Classic"
 DEFAULT_SPECTRUM = "Green"
 ZOOM_LEVELS = (1, 2, 4, 8)
+WF3D_RIDGES = 44                # number of history lines drawn in the 3D waterfall
+WF3D_STEP = 3                   # waterfall rows between two ridges (rows arrive one per spectrum frame)
 
 
 def make_lut(scheme: str = DEFAULT_WATERFALL) -> np.ndarray:
@@ -95,6 +97,7 @@ class SpectrumView(QWidget):
         self._wf: np.ndarray | None = None          # (rows, nbins) uint32 colours
         self._wl: np.ndarray | None = None          # (rows, nbins) uint8 levels (so a colour scheme can be swapped)
         self._zoom = 1
+        self._wf3d = False
         self._trace_color = QColor(SPECTRUM_SCHEMES[DEFAULT_SPECTRUM])
         self._level: np.ndarray | None = None
         self._frame: SpectrumFrame | None = None
@@ -150,6 +153,10 @@ class SpectrumView(QWidget):
     def set_zoom(self, zoom: int) -> None:
         """Show only the middle 1/zoom of the radio's span (display zoom; the radio's own span is not changed)."""
         self._zoom = zoom if zoom in ZOOM_LEVELS else 1
+        self.update()
+
+    def set_waterfall_3d(self, on: bool) -> None:
+        self._wf3d = bool(on)
         self.update()
 
     def set_waterfall_scheme(self, name: str) -> None:
@@ -457,11 +464,51 @@ class SpectrumView(QWidget):
     def _paint_waterfall(self, p: QPainter, w: int, top: int, height: int) -> None:
         if height <= 0 or self._wf is None:
             return
+        if self._wf3d:
+            self._paint_waterfall3d(p, w, top, height)
+            return
         rows, n = self._wf.shape
         img = QImage(self._wf.data, n, rows, n * 4, QImage.Format.Format_ARGB32)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         vis = n / self._zoom
         p.drawImage(QRectF(0, top, w, height), img, QRectF((n - vis) / 2, 0, vis, rows))
+
+    def _paint_waterfall3d(self, p: QPainter, w: int, top: int, height: int) -> None:
+        """Perspective waterfall: the newest spectrum in front, older ones stacked behind it (smaller and higher),
+        each drawn as a ridge whose height is the signal level and whose colour follows the waterfall scheme."""
+        if height < 40 or self._wl is None:
+            return
+        rows, n = self._wl.shape
+        npts = max(60, min(220, w // 4))
+        rel = np.linspace(-0.5, 0.5, npts)
+        pos = (n - 1) / 2 + rel * (n - 1) / self._zoom                  # same visible part of the span as the trace
+        count = max(2, min(WF3D_RIDGES, (rows - 1) // WF3D_STEP + 1))
+        front, depth, amp_front = top + height * 0.96, height * 0.60, height * 0.36
+        p.save()
+        p.setClipRect(QRectF(0, top, w, height))
+        p.fillRect(QRectF(0, top, w, height), QColor("#050a14"))
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        for k in range(count - 1, -1, -1):                              # far to near, so near ridges cover far ones
+            t = k / (count - 1)
+            lv = np.interp(pos, np.arange(n), self._wl[k * WF3D_STEP].astype(np.float64)) / 255.0
+            base = front - t * depth
+            xs = w / 2 + rel * w * (1.0 - 0.38 * t)
+            ys = base - lv * amp_front * (1.0 - 0.45 * t)
+            poly = QPolygonF([QPointF(xs[0], base + 5)] + [QPointF(float(x), float(y)) for x, y in zip(xs, ys)]
+                             + [QPointF(xs[-1], base + 5)])
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(6, 12, 24, 240))
+            p.drawPolygon(poly)
+            ci = np.clip(40 + lv * 215, 0, 255).astype(int)
+            seg = (ci[:-1] + ci[1:]) // 2 >> 4                            # 16 colour buckets along the ridge
+            alpha = int(255 - 110 * t)
+            for b in np.unique(seg):
+                colour = QColor.fromRgb(int(self._lut[int(b) * 16 + 8]))
+                colour.setAlpha(alpha)
+                p.setPen(QPen(colour, 1.4))
+                p.drawLines([QLineF(float(xs[i]), float(ys[i]), float(xs[i + 1]), float(ys[i + 1]))
+                             for i in np.nonzero(seg == b)[0]])
+        p.restore()
 
     def _paint_markers(self, p: QPainter, f: SpectrumFrame, w: int, h: int) -> None:
         if self._passband is not None:
@@ -469,7 +516,8 @@ class SpectrumView(QWidget):
             x1, x2 = self._x_of(f.center_hz + lo), self._x_of(f.center_hz + hi)
             band = QColor("#f0a830")
             band.setAlpha(45)
-            p.fillRect(QRectF(x1, 0, max(2.0, x2 - x1), h), band)
+            band_h = self._plot_h() + AXIS_H + PLAN_H if self._wf3d else h      # perspective: no flat band over it
+            p.fillRect(QRectF(x1, 0, max(2.0, x2 - x1), band_h), band)
         p.setPen(QPen(QColor("#f0a830"), 1.4))
         p.drawLine(int(w / 2), 0, int(w / 2), h)
         if self._hover is not None:

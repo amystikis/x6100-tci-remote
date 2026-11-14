@@ -340,6 +340,12 @@ class MainWindow(QMainWindow):
         self.spectrum_act.setChecked(load_show_spectrum())
         self.spectrum_act.toggled.connect(self.toggle_spectrum)
         m.addAction(self.spectrum_act)
+        self.wf3d_act = QAction("3D waterfall", self)
+        self.wf3d_act.setCheckable(True)
+        self.wf3d_act.setChecked(load_flag("wf3d", False))
+        self.wf3d_act.toggled.connect(self._wf3d_toggled)
+        self.spectrum.set_waterfall_3d(self.wf3d_act.isChecked())
+        m.addAction(self.wf3d_act)
         act = self.dock.toggleViewAction()
         act.setText("Protocol log")
         m.addAction(act)
@@ -547,6 +553,10 @@ class MainWindow(QMainWindow):
     def _drive_flush(self) -> None:
         self._drive_timer.stop()
         self._drive_send()
+
+    def _wf3d_toggled(self, on: bool) -> None:
+        save_flag("wf3d", on)
+        self.spectrum.set_waterfall_3d(on)
 
     def _zoom_changed(self) -> None:
         self.spectrum.set_zoom(self.zoom.currentData())
