@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Waterfall noise floor: Settings > Display has an auto noise floor (on by default; the waterfall follows the noise floor and only signals light up), a noise-floor trim slider, a contrast slider and a reset button. They are remembered.
+
 ## 0.3.2
 
 - The app connects automatically at start-up to the radio used last time (when its saved address is valid); a radio address given on the command line still wins. The zoom always starts at 1x.
