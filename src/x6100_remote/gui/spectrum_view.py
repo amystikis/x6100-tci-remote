@@ -43,6 +43,8 @@ SPECTRUM_SCHEMES: dict[str, str] = {                                   # trace c
 DEFAULT_WATERFALL = "Classic"
 DEFAULT_SPECTRUM = "Green"
 ZOOM_LEVELS = (1, 2, 4, 8)
+NF_MARGIN = 0.08                # auto noise floor: signals must stand this far (0..1) above the row's own noise floor
+NF_MANUAL = 0.25                # manual noise floor (auto off): the level that is shown as black
 
 
 def make_lut(scheme: str = DEFAULT_WATERFALL) -> np.ndarray:
@@ -94,6 +96,8 @@ class SpectrumView(QWidget):
         self._rows = rows
         self._wf: np.ndarray | None = None          # (rows, nbins) uint32 colours
         self._wl: np.ndarray | None = None          # (rows, nbins) uint8 levels (so a colour scheme can be swapped)
+        self._wmed: np.ndarray | None = None        # (rows,) smoothed noise floor (0..1) of each waterfall row
+        self._nf_auto, self._nf_offset, self._nf_contrast = True, 0.0, 1.0
         self._zoom = 1
         self._trace_color = QColor(SPECTRUM_SCHEMES[DEFAULT_SPECTRUM])
         self._level: np.ndarray | None = None
@@ -152,11 +156,29 @@ class SpectrumView(QWidget):
         self._zoom = zoom if zoom in ZOOM_LEVELS else 1
         self.update()
 
+    def set_noise_floor(self, auto: bool, offset: float = 0.0, contrast: float = 1.0) -> None:
+        """Waterfall noise floor. ``auto``: every line is shaded relative to its own noise floor, so the noise goes dark
+        and only signals show; ``offset`` (-0.1..0.3) trims that level. With ``auto`` off the floor is fixed at
+        NF_MANUAL + offset. ``contrast`` (0.5..2) is a gamma on what remains (above 1 brightens weak signals)."""
+        self._nf_auto, self._nf_offset, self._nf_contrast = bool(auto), float(offset), max(0.25, float(contrast))
+        if self._wl is not None:
+            self._wf = self._shade(self._wl, self._wmed)
+        self.update()
+
+    def _shade(self, levels: np.ndarray, med: np.ndarray) -> np.ndarray:
+        """Colours (0xFFRRGGBB) for waterfall levels (uint8 rows) with the noise floor applied."""
+        x = levels.astype(np.float32) / 255.0
+        floor = (med.astype(np.float32) + NF_MARGIN + self._nf_offset if self._nf_auto
+                 else np.full(len(levels), NF_MANUAL + self._nf_offset, dtype=np.float32))
+        floor = np.clip(floor, 0.0, 0.9)[:, None]
+        y = np.clip((x - floor) / (1.0 - floor), 0.0, 1.0) ** (1.0 / self._nf_contrast)
+        return self._lut[(y * 255).astype(np.uint8)]
+
     def set_waterfall_scheme(self, name: str) -> None:
         self._lut = make_lut(name)
         self._bg = int(self._lut[0])
         if self._wl is not None:
-            self._wf = self._lut[self._wl]
+            self._wf = self._shade(self._wl, self._wmed)
         self.update()
 
     def set_spectrum_scheme(self, name: str) -> None:
@@ -180,7 +202,7 @@ class SpectrumView(QWidget):
         return None
 
     def clear(self) -> None:
-        self._frame = self._wf = self._wl = self._level = None
+        self._frame = self._wf = self._wl = self._wmed = self._level = None
         self._leveler = Leveler()
         self.update()
 
@@ -190,14 +212,20 @@ class SpectrumView(QWidget):
         if self._wf is None or self._wf.shape[1] != n:
             self._wf = np.full((self._rows, n), self._bg, dtype=np.uint32)
             self._wl = np.zeros((self._rows, n), dtype=np.uint8)
+            self._wmed = np.zeros(self._rows, dtype=np.float32)
         elif old is not None and (old.center_hz != frame.center_hz or old.span_hz != frame.span_hz):
             self._shift_waterfall(old, frame)
         level = self._leveler.update(frame.bins)
         lv = (level * 255).astype(np.uint8)
+        med = float(np.median(level))
+        if self.frames:                                            # steady floor from line to line
+            med = 0.85 * float(self._wmed[0]) + 0.15 * med
         self._wf[1:] = self._wf[:-1].copy()
         self._wl[1:] = self._wl[:-1].copy()
-        self._wf[0] = self._lut[lv]
+        self._wmed[1:] = self._wmed[:-1].copy()
+        self._wmed[0] = med
         self._wl[0] = lv
+        self._wf[0] = self._shade(lv[None, :], self._wmed[:1])[0]
         self._level, self._frame = level, frame
         self._track_cw(frame)
         self.frames += 1

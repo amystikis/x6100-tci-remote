@@ -155,3 +155,26 @@ def test_reading_is_steady_and_bars_hold():
     v.push(frame_with({}))
     v.grab()
     assert v._cw_hold.max() > 0.8 * peak                                 # bars fall slowly, not instantly
+
+
+def test_waterfall_noise_floor_darkens_noise_and_keeps_signals():
+    from PySide6.QtWidgets import QApplication
+
+    from x6100_remote.gui.spectrum_view import SpectrumView
+    QApplication.instance() or QApplication([])
+    v = SpectrumView(rows=20)
+    v.resize(800, 500)
+    for i in range(20):
+        v.push(frame_with({60.0: 60}, seed=i))
+    sig = int(N / 2 + 60.0 / HZ_BIN)
+    quiet = N // 4
+    v.set_noise_floor(False, -0.1, 1.0)                                  # a low fixed floor: noise is visible
+    noisy = int(v._wf[0, quiet]), int(v._wf[0, sig])
+    v.set_noise_floor(True, 0.0, 1.0)                                    # follows the noise: noise goes dark
+    dark = int(v._wf[0, quiet]), int(v._wf[0, sig])
+    assert noisy[0] != int(v._bg) and dark[0] == int(v._bg)              # noise darkened ...
+    assert dark[1] != int(v._bg)                                         # ... the signal is still there
+    before = v._wf.copy()
+    v.set_noise_floor(True, 0.0, 2.0)                                    # contrast changes the history too
+    assert not (v._wf == before).all()
+    v.grab()

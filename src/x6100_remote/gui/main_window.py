@@ -168,6 +168,7 @@ class MainWindow(QMainWindow):
         self.zoom.currentIndexChanged.connect(self._zoom_changed)
         self.spectrum.set_waterfall_scheme(self.wf_scheme())
         self.spectrum.set_spectrum_scheme(self.sp_scheme())
+        self.spectrum.set_noise_floor(*self.noise_floor_settings())
         self.cw_box = QGroupBox("CW decoder (decoded by the radio)")
         cwl = QHBoxLayout(self.cw_box)
         cwl.setContentsMargins(8, 2, 8, 4)
@@ -583,6 +584,14 @@ class MainWindow(QMainWindow):
         save_choice("spectrum_scheme", name)
         self.spectrum.set_spectrum_scheme(name)
 
+    @staticmethod
+    def noise_floor_settings() -> tuple[bool, float, float]:
+        try:
+            return (load_choice("nf_auto", "1") != "0", float(load_choice("nf_offset", "0")),
+                    float(load_choice("nf_contrast", "1")))
+        except ValueError:
+            return True, 0.0, 1.0
+
     def _build_settings_dialog(self) -> None:
         """Settings dialog: 'Connection' (radio address + connect) and 'Display' (colour schemes, applied at once)."""
         dlg = self.settings_dlg = QDialog(self)
@@ -609,6 +618,38 @@ class MainWindow(QMainWindow):
         sp.currentTextChanged.connect(self._spectrum_scheme_chosen)
         form.addRow("Waterfall colours", wf)
         form.addRow("Spectrum colour", sp)
+        auto = QCheckBox("Auto noise floor (follows the noise by itself)")
+        floor, contrast = QSlider(Qt.Orientation.Horizontal), QSlider(Qt.Orientation.Horizontal)
+        floor.setRange(-10, 30)
+        contrast.setRange(50, 200)
+        floor_lbl, contrast_lbl = QLabel(), QLabel()
+        nf = self.noise_floor_settings()
+        auto.setChecked(nf[0])
+        floor.setValue(round(nf[1] * 100))
+        contrast.setValue(round(nf[2] * 100))
+
+        def show_values() -> None:
+            floor_lbl.setText("%+d %%" % floor.value())
+            contrast_lbl.setText("%d %%" % contrast.value())
+
+        def apply_noise_floor() -> None:
+            show_values()
+            save_choice("nf_auto", "1" if auto.isChecked() else "0")
+            save_choice("nf_offset", str(floor.value() / 100))
+            save_choice("nf_contrast", str(contrast.value() / 100))
+            self.spectrum.set_noise_floor(auto.isChecked(), floor.value() / 100, contrast.value() / 100)
+        auto.toggled.connect(apply_noise_floor)
+        floor.valueChanged.connect(apply_noise_floor)
+        contrast.valueChanged.connect(apply_noise_floor)
+        show_values()
+        form.addRow(auto)
+        for label, slider, value_lbl in (("Noise floor", floor, floor_lbl), ("Contrast", contrast, contrast_lbl)):
+            row = QHBoxLayout()
+            row.addWidget(slider, 1)
+            value_lbl.setMinimumWidth(48)
+            row.addWidget(value_lbl)
+            form.addRow(label, row)
+        form.addRow(_btn("Reset", slot=lambda: (auto.setChecked(True), floor.setValue(0), contrast.setValue(100))))
         tabs.addTab(page, "Display")
         lay.addWidget(_btn("Close", slot=lambda: dlg.accept()), 0, Qt.AlignmentFlag.AlignRight)
 

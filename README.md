@@ -77,7 +77,10 @@ automatic (the radio's bin values are not calibrated). Hide it with View > Spect
 
 - **Zoom** (1x, 2x, 4x, 8x, next to the frequency step; always starts at 1x) shows the middle part of the radio's 100 kHz span. It is a display
   zoom only (the panel protocol has no span command), so the resolution does not get finer.
-- **Colours**: Settings > Settings... > Display picks the waterfall colour scheme and the spectrum trace colour.
+- **Colours and noise floor**: Settings > Settings... > Display picks the waterfall colour scheme and the spectrum trace
+  colour. **Auto noise floor** (on by default) shades every waterfall line relative to its own noise floor, so the noise
+  goes dark and only signals show; the **Noise floor** slider trims that level, **Contrast** brightens or dims what is
+  left, and **Reset** restores the defaults. With the auto switch off, the floor is fixed and the slider moves it.
 - The radio address and **Connect** live in Settings > Connection; the connection status is at the bottom of the
   window and a **UTC clock** is at the top right.
 
