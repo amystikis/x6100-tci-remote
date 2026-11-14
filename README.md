@@ -8,8 +8,9 @@ audio, read the S-meter, see a **spectrum and waterfall** (click to tune), and (
 
 ## Status
 
-- **Version 0.3.3.** The author has tested it against a real X6100 (OpenX6X00 firmware; the X6200 is expected to work the same way but has not been tested): tuning and mode, spectrum and
-  waterfall, pairing, the radio key buttons, the CW decoder text and the CW tuner indicator all work.
+- **Version 0.3.3.** The author has tested it against a real X6100 (OpenX6X00 firmware; the X6200 is expected to work
+  the same way but has not been tested): tuning and mode, spectrum and waterfall, pairing, the radio key buttons, the CW
+  decoder text and the CW tuner indicator all work.
 - Automated tests run against a **fake radio** included in this repo (`x6100-tci-remote --demo`).
 - **Transmit is experimental.** Test only into a dummy load.
 - The radio does **not** stream IQ over TCI (tested with `scripts/probe_tci.py`), so there are no own demodulators. The
@@ -27,7 +28,12 @@ On Debian/Ubuntu, Qt may need `sudo apt install libxcb-cursor0` (error "could no
 
 ### Windows
 
-The code is cross-platform (Qt, websockets, numpy), so it also runs on Windows 10/11 with Python 3.10+:
+Download `x6100-tci-remote_<version>_windows.msi` from the [GitHub releases](https://github.com/amystikis/x6100-tci-remote/releases)
+and run it. It installs to Program Files, adds a Start menu entry and a desktop shortcut, and a newer installer upgrades
+the old version in place. The `.zip` next to it is a portable copy: unzip and run `x6100-tci-remote.exe`. Windows
+SmartScreen may warn about the installer because it is not code-signed.
+
+From source (Windows 10/11, Python 3.10+):
 
 ```powershell
 py -m venv .venv; .venv\Scripts\Activate.ps1
@@ -35,12 +41,11 @@ pip install ".[gui]"
 x6100-tci-remote-gui 192.168.0.150
 ```
 
-The easiest way is the **installer**: download `x6100-tci-remote_<version>_windows.msi` from the GitHub release and run it. It installs to Program Files, adds a Start menu entry and a desktop shortcut, and a newer installer upgrades the old version in place. (The `.zip` is a portable copy: unzip and run `x6100-tci-remote.exe`.)
-
-To build the standalone folder, zip and installer yourself (no Python needed on the target machine): `powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1`
-(writes `build\x6100-tci-remote_<version>_windows.zip`), then `packaging\build_msi.ps1` for the `.msi` (needs the .NET SDK; it installs WiX as a dotnet tool). The remote-PTT command
-(`x6100-tci-remote.exe --ptt toggle`) works from a shortcut or hotkey tool such as AutoHotkey; the windowed exe prints
-no text, so check its exit code (0 = ok). The Windows build is new and has not yet been tested against a real radio.
+To build the standalone folder, zip and installer yourself: `powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1`
+(PyInstaller; writes `build\x6100-tci-remote_<version>_windows.zip`), then `packaging\build_msi.ps1` for the `.msi`
+(needs the .NET SDK; it installs WiX as a dotnet tool). The remote-PTT command (`x6100-tci-remote.exe --ptt toggle`)
+works from a shortcut or a hotkey tool such as AutoHotkey; the windowed exe prints no text, so check its exit code
+(0 = ok). The Windows build is new and has not yet been tested against a real radio.
 
 ### Debian package
 
@@ -51,7 +56,7 @@ packaging/build_deb.sh                         # writes build/x6100-tci-remote_<
 sudo apt install ./build/x6100-tci-remote_*_all.deb
 ```
 
-Releases on GitHub carry the built `.deb` and the Windows zip (built automatically when the version in `pyproject.toml` is bumped and pushed to `main`). If an install is refused, `sudo apt install -f` and the exact apt message tell you which library is missing. apt installs python3-venv and (as recommends) the Qt/xcb system libraries; the package's post-install step then
+Each [GitHub release](https://github.com/amystikis/x6100-tci-remote/releases) carries the `.deb`, the Windows `.msi` and the Windows `.zip`; they are built automatically when the version in `pyproject.toml` is bumped and pushed to `main`. If an install is refused, `sudo apt install -f` and the exact apt message tell you which library is missing. apt installs python3-venv and (as recommends) the Qt/xcb system libraries; the package's post-install step then
 creates `/opt/x6100-tci-remote/venv` and installs PySide6, websockets and numpy from PyPI into it (internet needed once;
 Debian/Ubuntu do not ship PySide6 under a stable package name, and their `websockets` is older than the version needed).
 If that step could not reach the internet, run the `pip install` line it prints. Removing the package deletes the venv.
@@ -59,7 +64,8 @@ Start the app from the application menu or run `x6100-tci-remote`.
 
 ## Run
 
-The app reconnects automatically at start-up to the radio you used last time (if its address is valid). To use another radio, give its address below or change it in Settings > Connection.
+At start-up the app connects automatically to the radio you used last time (if its saved address is valid). To use
+another radio, give its address on the command line or change it in Settings > Connection.
 
 ```bash
 x6100-tci-remote 192.168.0.150     # your radio's address (port defaults to 50001)
@@ -131,9 +137,13 @@ It has the same guards as the PTT button: "Enable transmit controls" must be tic
 auto-unkey timer still applies; a hotkey-keyed PTT does not drop when the window loses focus. `--ptt off` always works.
 The command talks to the running app over a per-user local socket, never over the network.
 
-## View menu
+## Menus and settings
 
-Band, Mode, Receiver and Audio can each be hidden or shown from View; the choice is remembered.
+- **View**: show or hide the spectrum & waterfall, the protocol log, the Band, Mode, Receiver and Audio boxes, the CW
+  tuner indicator and the DX spots; the choices are remembered.
+- **Settings > Settings...**: the **Connection** tab (radio address and Connect/Disconnect) and the **Display** tab
+  (waterfall colour scheme, spectrum colour, auto noise floor, noise-floor and contrast sliders).
+- **Help > About**: version, licence, and credits.
 
 ## Safety
 
