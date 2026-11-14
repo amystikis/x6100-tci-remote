@@ -3,22 +3,24 @@ from __future__ import annotations
 
 import platform
 import time
+from datetime import datetime, timezone
 
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QAction, QKeyEvent
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDockWidget, QFrame, QGridLayout, QGroupBox,
-                               QHBoxLayout, QInputDialog, QLabel, QMainWindow, QPlainTextEdit,
-                               QPushButton, QSlider, QSpinBox, QVBoxLayout, QWidget)
+from PySide6.QtGui import QAction, QFont, QKeyEvent
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDockWidget, QFormLayout, QFrame, QGridLayout, QGroupBox,
+                               QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMessageBox, QPlainTextEdit,
+                               QPushButton, QSlider, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
 
 from .. import __version__
 from ..cwtuner import target_hz
 from ..ipc import CommandServer
 from .audio import AVAILABLE as AUDIO_OK, MicSource, RxAudio
-from .settings import (load_band_memory, load_flag, load_panel_token, load_radios, load_show_spectrum,
+from .settings import (load_band_memory, load_choice, load_flag, load_panel_token, load_radios, load_show_spectrum,
                        load_window_geometry, panel_url_for, parse_target, remember_radio, save_band_memory,
-                       save_flag, save_panel_token, save_show_spectrum, save_window_geometry)
-from .spectrum_view import SpectrumView
-from .widgets import FrequencyDisplay, SMeter
+                       save_choice, save_flag, save_panel_token, save_show_spectrum, save_window_geometry)
+from .spectrum_view import (DEFAULT_SPECTRUM, DEFAULT_WATERFALL, SPECTRUM_SCHEMES, WATERFALL_SCHEMES,
+                            ZOOM_LEVELS, SpectrumView)
+from .widgets import AMBER, FrequencyDisplay, SMeter
 from .worker import TciWorker
 
 # name, lo Hz, hi Hz, default Hz, default mode
@@ -93,8 +95,27 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(8, 6, 8, 6)
         v.setSpacing(4)
 
-        # connection bar ------------------------------------------------------
-        bar = QHBoxLayout()
+        # top row: UTC clock, top right ---------------------------------------------
+        top = QHBoxLayout()
+        top.addStretch(1)
+        self.clock = QLabel("")
+        cf = QFont(self.font())
+        cf.setFamilies(["DejaVu Sans Mono", "Liberation Mono", "Consolas", "Menlo", "Courier New", "monospace"])
+        cf.setStyleHint(QFont.StyleHint.Monospace)
+        cf.setPointSize(26)
+        cf.setWeight(QFont.Weight.DemiBold)
+        self.clock.setFont(cf)
+        self.clock.setStyleSheet("color:%s" % AMBER.name())          # same colour as the frequency digits
+        self.clock.setToolTip("Coordinated Universal Time (UTC)")
+        top.addWidget(self.clock)
+        v.addLayout(top)
+        self.clock_timer = QTimer(self)
+        self.clock_timer.setInterval(500)
+        self.clock_timer.timeout.connect(self._tick_clock)
+        self.clock_timer.start()
+        self._tick_clock()
+
+        # connection widgets live in Settings > Connection; the status is in the status bar at the bottom ---------
         self.addr = QComboBox()
         self.addr.setEditable(True)
         self.addr.setMinimumWidth(240)
@@ -103,11 +124,9 @@ class MainWindow(QMainWindow):
         self.addr.lineEdit().returnPressed.connect(self.toggle_connection)
         self.connect_btn = _btn("Connect", slot=self.toggle_connection)
         self.status = QLabel("Not connected")
-        bar.addWidget(QLabel("Radio"))
-        bar.addWidget(self.addr, 1)
-        bar.addWidget(self.connect_btn)
-        bar.addWidget(self.status, 2)
-        v.addLayout(bar)
+        self.status.setTextFormat(Qt.TextFormat.RichText)
+        self.statusBar().addPermanentWidget(self.status)
+        self._build_settings_dialog()
 
         # VFO + meter -----------------------------------------------------------
         self.freq = FrequencyDisplay()
@@ -127,6 +146,17 @@ class MainWindow(QMainWindow):
         info.addWidget(self.step)
         info.addWidget(_btn("◀ −", slot=lambda: self.tune_by(-self.step.currentData())))
         info.addWidget(_btn("+ ▶", slot=lambda: self.tune_by(self.step.currentData())))
+        self.zoom = QComboBox()
+        self.zoom.setToolTip("Spectrum and waterfall zoom (display only; the radio's own span is not changed)")
+        for z in ZOOM_LEVELS:
+            self.zoom.addItem("%dx" % z, z)
+        try:
+            self.zoom.setCurrentIndex(max(0, self.zoom.findData(int(load_choice("zoom", "1")))))
+        except ValueError:
+            pass
+        info.addSpacing(12)
+        info.addWidget(QLabel("Zoom"))
+        info.addWidget(self.zoom)
         v.addLayout(info)
         self.status_strip = QLabel("")
         self.status_strip.setTextFormat(Qt.TextFormat.RichText)
@@ -137,6 +167,10 @@ class MainWindow(QMainWindow):
         self.spectrum.tune_to.connect(self.tune_to)
         self.spectrum.step.connect(lambda d: self.tune_by(d * self.step.currentData()))
         v.addWidget(self.spectrum, 1)
+        self.spectrum.set_zoom(self.zoom.currentData())
+        self.zoom.currentIndexChanged.connect(self._zoom_changed)
+        self.spectrum.set_waterfall_scheme(self.wf_scheme())
+        self.spectrum.set_spectrum_scheme(self.sp_scheme())
         self.cw_box = QGroupBox("CW decoder (decoded by the radio)")
         cwl = QHBoxLayout(self.cw_box)
         cwl.setContentsMargins(8, 2, 8, 4)
@@ -335,10 +369,11 @@ class MainWindow(QMainWindow):
         self.spots_act.toggled.connect(self.spectrum.set_show_spots)
         m.addAction(self.spots_act)
         self.spectrum.setVisible(self.spectrum_act.isChecked())
+        sm = self.menuBar().addMenu("&Settings")
+        sm.addAction("Settings...", self.open_settings)
         h = self.menuBar().addMenu("&Help")
         about = QAction("About", self)
-        about.triggered.connect(lambda: self.statusBar().showMessage(
-            "X6100 TCI Remote %s - LGPL-2.1-or-later licensed, talks Expert Electronics TCI" % __version__, 6000))
+        about.triggered.connect(self.show_about)
         h.addAction(about)
 
         # watchdog + wiring -------------------------------------------------------------
@@ -515,6 +550,66 @@ class MainWindow(QMainWindow):
     def _drive_flush(self) -> None:
         self._drive_timer.stop()
         self._drive_send()
+
+    def _zoom_changed(self) -> None:
+        save_choice("zoom", str(self.zoom.currentData()))
+        self.spectrum.set_zoom(self.zoom.currentData())
+
+    @staticmethod
+    def wf_scheme() -> str:
+        name = load_choice("waterfall_scheme", DEFAULT_WATERFALL)
+        return name if name in WATERFALL_SCHEMES else DEFAULT_WATERFALL
+
+    @staticmethod
+    def sp_scheme() -> str:
+        name = load_choice("spectrum_scheme", DEFAULT_SPECTRUM)
+        return name if name in SPECTRUM_SCHEMES else DEFAULT_SPECTRUM
+
+    def show_about(self) -> None:
+        QMessageBox.about(self, "About X6100 TCI Remote", (
+            "<h3>X6100 TCI Remote %s</h3>"
+            "<p>An independent desktop remote controller for the Xiegu X6100.</p>"
+            "<p><b>This app works only with the OpenX6X00 firmware</b> "
+            "(<a href='https://openx6x00.org/'>https://openx6x00.org/</a>), which provides the TCI and panel "
+            "servers it talks to. It does not work with the stock Xiegu firmware.</p>"
+            "<p>Credits to <b>RF.Guru (Joeri Van Dooren ON6URE)</b> and all who are contributing to this "
+            "open-source firmware for the radio.</p>"
+            "<p>Licensed under LGPL-2.1-or-later.</p>") % __version__)
+
+    def _tick_clock(self) -> None:
+        self.clock.setText(datetime.now(timezone.utc).strftime("%H:%M:%S UTC"))
+
+    def _build_settings_dialog(self) -> None:
+        """Settings dialog: 'Connection' (radio address + connect) and 'Display' (colour schemes, applied at once)."""
+        dlg = self.settings_dlg = QDialog(self)
+        dlg.setWindowTitle("Settings")
+        lay = QVBoxLayout(dlg)
+        tabs = self.settings_tabs = QTabWidget()
+        lay.addWidget(tabs)
+
+        conn = QWidget()
+        cl = QHBoxLayout(conn)
+        cl.addWidget(QLabel("Radio"))
+        cl.addWidget(self.addr, 1)
+        cl.addWidget(self.connect_btn)
+        tabs.addTab(conn, "Connection")
+
+        page = QWidget()
+        form = QFormLayout(page)
+        wf, sp = QComboBox(), QComboBox()
+        wf.addItems(list(WATERFALL_SCHEMES))
+        sp.addItems(list(SPECTRUM_SCHEMES))
+        wf.setCurrentText(self.wf_scheme())
+        sp.setCurrentText(self.sp_scheme())
+        wf.currentTextChanged.connect(lambda n: (save_choice("waterfall_scheme", n), self.spectrum.set_waterfall_scheme(n)))
+        sp.currentTextChanged.connect(lambda n: (save_choice("spectrum_scheme", n), self.spectrum.set_spectrum_scheme(n)))
+        form.addRow("Waterfall colours", wf)
+        form.addRow("Spectrum colour", sp)
+        tabs.addTab(page, "Display")
+        lay.addWidget(_btn("Close", slot=lambda: dlg.accept()), 0, Qt.AlignmentFlag.AlignRight)
+
+    def open_settings(self) -> None:
+        self.settings_dlg.exec()
 
     def _show_group(self, key: str, box: QGroupBox, on: bool) -> None:
         save_flag("show_" + key, on)

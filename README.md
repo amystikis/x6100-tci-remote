@@ -8,7 +8,7 @@ audio, read the S-meter, see a **spectrum and waterfall** (click to tune), and (
 
 ## Status
 
-- **Version 0.2.2.** The author has tested it against a real X6100 (OpenX6X00 firmware): tuning and mode, spectrum and
+- **Version 0.3.0.** The author has tested it against a real X6100 (OpenX6X00 firmware): tuning and mode, spectrum and
   waterfall, pairing, the radio key buttons, the CW decoder text and the CW tuner indicator all work.
 - Automated tests run against a **fake radio** included in this repo (`x6100-tci-remote --demo`).
 - **Transmit is experimental.** Test only into a dummy load.
@@ -49,7 +49,7 @@ packaging/build_deb.sh                         # writes build/x6100-tci-remote_<
 sudo apt install ./build/x6100-tci-remote_*_all.deb
 ```
 
-Releases on GitHub carry the built `.deb`. If an install is refused, `sudo apt install -f` and the exact apt message tell you which library is missing. apt installs python3-venv and (as recommends) the Qt/xcb system libraries; the package's post-install step then
+Releases on GitHub carry the built `.deb` and the Windows zip (built automatically when the version in `pyproject.toml` is bumped and pushed to `main`). If an install is refused, `sudo apt install -f` and the exact apt message tell you which library is missing. apt installs python3-venv and (as recommends) the Qt/xcb system libraries; the package's post-install step then
 creates `/opt/x6100-tci-remote/venv` and installs PySide6, websockets and numpy from PyPI into it (internet needed once;
 Debian/Ubuntu do not ship PySide6 under a stable package name, and their `websockets` is older than the version needed).
 If that step could not reach the internet, run the `pip install` line it prints. Removing the package deletes the venv.
@@ -137,6 +137,12 @@ ruff check .
 
 - [docs/PROTOCOL.md](docs/PROTOCOL.md) - what the radio exposes and how the app talks to it
 - [docs/ROADMAP.md](docs/ROADMAP.md) - next steps
+
+## Credits
+
+This app only works with the **OpenX6X00** firmware for the Xiegu X6100 (https://openx6x00.org/), which provides the TCI
+and panel servers it talks to. Thanks to **RF.Guru (Joeri Van Dooren ON6URE)** and everyone contributing to that
+open-source firmware.
 
 ## License
 

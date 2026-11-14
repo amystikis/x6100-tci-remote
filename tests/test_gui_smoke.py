@@ -305,3 +305,31 @@ def test_cw_modes_centre_the_passband_and_enable_the_tuner(env):
     assert win.spectrum._passband == (50, 2850)
     win.w.disconnect_panel()
     asyncio.run_coroutine_threadsafe(asyncio.sleep(0.05), win.w.loop).result(2)
+
+
+def test_zoom_and_colour_schemes(env):
+    win, _radio, pump = env
+    from x6100_remote.gui.spectrum_view import SPECTRUM_SCHEMES, WATERFALL_SCHEMES, ZOOM_LEVELS
+    assert [win.zoom.itemData(i) for i in range(win.zoom.count())] == list(ZOOM_LEVELS) == [1, 2, 4, 8]
+    pump(lambda: win.spectrum._frame is not None)
+    sv = win.spectrum
+    f = sv._frame
+    win.zoom.setCurrentIndex(win.zoom.findData(4))
+    assert sv._zoom == 4
+    assert sv._x_of(f.center_hz + f.span_hz / 8) == pytest.approx(sv.width())      # visible span is 1/4
+    assert sv._hz_at(sv.width() / 2) == pytest.approx(f.center_hz)
+    sv.grab()                                                                       # paints at zoom without error
+    before = sv._wf.copy()
+    sv.set_waterfall_scheme("Grayscale")
+    assert "Grayscale" in WATERFALL_SCHEMES and not (sv._wf == before).all()        # history is recoloured
+    sv.set_spectrum_scheme("Amber")
+    assert sv._trace_color.name() == SPECTRUM_SCHEMES["Amber"]
+    sv.grab()
+
+
+def test_clock_connection_settings_and_status_bar(env):
+    win, _radio, _pump = env
+    assert win.clock.text().endswith(" UTC")
+    assert win.addr.window() is win.settings_dlg and win.connect_btn.window() is win.settings_dlg
+    assert win.settings_tabs.tabText(0) == "Connection"
+    assert win.status.parent() is win.statusBar()

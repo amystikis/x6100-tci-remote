@@ -11,19 +11,37 @@ from ..panelinfo import PLAN_CW, PLAN_DIGITAL, PLAN_PHONE, PlanSegment, Spot
 from ..spectrum import SpectrumFrame
 
 AXIS_H = 18
-PLAN_H = 4
+PLAN_H = 14                     # band-plan strip under the frequency axis (holds the labels)
 SPOT_LANES = 3
 SPOT_LANE_H = 13
 PLAN_COLORS = {PLAN_CW: "#3b82f6", PLAN_DIGITAL: "#a855f7", PLAN_PHONE: "#22c55e"}
 PLAN_OTHER_COLOR = "#64748b"
+PLAN_LABELS = {PLAN_CW: ("CW",), PLAN_DIGITAL: ("DIGITAL", "DIGI", "DG"), PLAN_PHONE: ("ALL MODES / SSB", "ALL / SSB", "SSB", "PH")}
+PLAN_OTHER_LABELS = ("OTHER", "OTH")
 SPOT_COLORS = {"CW": "#f0a830", "SSB": "#4cc9f0"}
 TICK_STEPS = (500, 1000, 2000, 2500, 5000, 10_000, 20_000, 50_000, 100_000, 250_000, 500_000)
 
 
-def make_lut() -> np.ndarray:
-    """256-entry colour map (dark blue -> blue -> cyan -> yellow -> red) as 0xFFRRGGBB values."""
-    stops = np.array([0.0, 0.25, 0.5, 0.75, 1.0])
-    rgb = np.array([(2, 6, 28), (8, 48, 168), (0, 200, 210), (245, 225, 50), (255, 70, 30)], dtype=float)
+WATERFALL_SCHEMES: dict[str, list[tuple[int, int, int]]] = {       # 5 evenly spaced colour stops, weak -> strong
+    "Classic": [(2, 6, 28), (8, 48, 168), (0, 200, 210), (245, 225, 50), (255, 70, 30)],
+    "Inferno": [(0, 0, 4), (87, 16, 110), (188, 55, 84), (249, 142, 9), (252, 255, 164)],
+    "Viridis": [(68, 1, 84), (59, 82, 139), (33, 145, 140), (94, 201, 98), (253, 231, 37)],
+    "Grayscale": [(0, 0, 0), (64, 64, 64), (128, 128, 128), (192, 192, 192), (255, 255, 255)],
+    "Green phosphor": [(0, 8, 0), (0, 70, 10), (0, 150, 30), (80, 230, 60), (220, 255, 200)],
+    "Ice": [(5, 10, 30), (20, 60, 120), (60, 140, 200), (170, 220, 245), (255, 255, 255)],
+}
+SPECTRUM_SCHEMES: dict[str, str] = {                                   # trace colour
+    "Green": "#3ddc97", "Cyan": "#4cc9f0", "Amber": "#f0a830", "White": "#e6edf7", "Magenta": "#e879f9",
+}
+DEFAULT_WATERFALL = "Classic"
+DEFAULT_SPECTRUM = "Green"
+ZOOM_LEVELS = (1, 2, 4, 8)
+
+
+def make_lut(scheme: str = DEFAULT_WATERFALL) -> np.ndarray:
+    """256-entry colour map for a waterfall scheme as 0xFFRRGGBB values."""
+    stops = np.linspace(0.0, 1.0, 5)
+    rgb = np.array(WATERFALL_SCHEMES.get(scheme, WATERFALL_SCHEMES[DEFAULT_WATERFALL]), dtype=float)
     x = np.linspace(0, 1, 256)
     ch = [np.interp(x, stops, rgb[:, i]).astype(np.uint32) for i in range(3)]
     return (0xFF000000 | (ch[0] << 16) | (ch[1] << 8) | ch[2]).astype(np.uint32)
@@ -68,6 +86,9 @@ class SpectrumView(QWidget):
         self._bg = int(self._lut[0])
         self._rows = rows
         self._wf: np.ndarray | None = None          # (rows, nbins) uint32 colours
+        self._wl: np.ndarray | None = None          # (rows, nbins) uint8 levels (so a colour scheme can be swapped)
+        self._zoom = 1
+        self._trace_color = QColor(SPECTRUM_SCHEMES[DEFAULT_SPECTRUM])
         self._level: np.ndarray | None = None
         self._frame: SpectrumFrame | None = None
         self._leveler = Leveler()
@@ -112,6 +133,22 @@ class SpectrumView(QWidget):
                          if (bandwidth_hz and self._frame) else None)
         self.update()
 
+    def set_zoom(self, zoom: int) -> None:
+        """Show only the middle 1/zoom of the radio's span (display zoom; the radio's own span is not changed)."""
+        self._zoom = zoom if zoom in ZOOM_LEVELS else 1
+        self.update()
+
+    def set_waterfall_scheme(self, name: str) -> None:
+        self._lut = make_lut(name)
+        self._bg = int(self._lut[0])
+        if self._wl is not None:
+            self._wf = self._lut[self._wl]
+        self.update()
+
+    def set_spectrum_scheme(self, name: str) -> None:
+        self._trace_color = QColor(SPECTRUM_SCHEMES.get(name, SPECTRUM_SCHEMES[DEFAULT_SPECTRUM]))
+        self.update()
+
     def set_show_cw_tuner(self, on: bool) -> None:
         self.show_cw_tuner = on
         self.update()
@@ -129,7 +166,7 @@ class SpectrumView(QWidget):
         return None
 
     def clear(self) -> None:
-        self._frame = self._wf = self._level = None
+        self._frame = self._wf = self._wl = self._level = None
         self._leveler = Leveler()
         self.update()
 
@@ -138,12 +175,15 @@ class SpectrumView(QWidget):
         old = self._frame
         if self._wf is None or self._wf.shape[1] != n:
             self._wf = np.full((self._rows, n), self._bg, dtype=np.uint32)
+            self._wl = np.zeros((self._rows, n), dtype=np.uint8)
         elif old is not None and (old.center_hz != frame.center_hz or old.span_hz != frame.span_hz):
             self._shift_waterfall(old, frame)
         level = self._leveler.update(frame.bins)
-        row = self._lut[(level * 255).astype(np.uint8)]
+        lv = (level * 255).astype(np.uint8)
         self._wf[1:] = self._wf[:-1].copy()
-        self._wf[0] = row
+        self._wl[1:] = self._wl[:-1].copy()
+        self._wf[0] = self._lut[lv]
+        self._wl[0] = lv
         self._level, self._frame = level, frame
         self._cw_tune = (smooth(self._cw_tune, analyze(frame, self._cw_bw, target_hz=self._cw_target), self._cw_bw)
                          if self._cw_bw else None)
@@ -154,28 +194,29 @@ class SpectrumView(QWidget):
         """The radio re-centres on the VFO: slide the history so signals stay where they are."""
         n = self._wf.shape[1]
         d = round((new.center_hz - old.center_hz) / new.hz_per_bin)
-        if old.span_hz != new.span_hz or abs(d) >= n:
-            self._wf[:] = self._bg
-        elif d > 0:
-            self._wf[:, :-d] = self._wf[:, d:].copy()
-            self._wf[:, -d:] = self._bg
-        elif d < 0:
-            self._wf[:, -d:] = self._wf[:, :d].copy()
-            self._wf[:, :-d] = self._bg
+        for a, bg in ((self._wf, self._bg), (self._wl, 0)):
+            if old.span_hz != new.span_hz or abs(d) >= n:
+                a[:] = bg
+            elif d > 0:
+                a[:, :-d] = a[:, d:].copy()
+                a[:, -d:] = bg
+            elif d < 0:
+                a[:, -d:] = a[:, :d].copy()
+                a[:, :-d] = bg
 
     # geometry ------------------------------------------------------------------------------------
     def _plot_h(self) -> int:
-        return max(60, int((self.height() - AXIS_H) * 0.38))
+        return max(60, int((self.height() - AXIS_H - PLAN_H) * 0.38))
 
     def _hz_at(self, x: float) -> float | None:
         f = self._frame
         if f is None or self.width() <= 0:
             return None
-        return f.center_hz + (x / self.width() - 0.5) * f.span_hz
+        return f.center_hz + (x / self.width() - 0.5) * f.span_hz / self._zoom
 
     def _x_of(self, hz: float) -> float:
         f = self._frame
-        return (hz - f.center_hz) / f.span_hz * self.width() + self.width() / 2
+        return (hz - f.center_hz) / (f.span_hz / self._zoom) * self.width() + self.width() / 2
 
     # input ---------------------------------------------------------------------------------------
     def mouseMoveEvent(self, e) -> None:
@@ -221,7 +262,7 @@ class SpectrumView(QWidget):
         self._paint_plan(p, f, w, ph)
         self._paint_spots(p, f, w, ph)
         self._paint_cw_tuner(p, f, w, ph)
-        self._paint_waterfall(p, w, ph + AXIS_H, h - ph - AXIS_H)
+        self._paint_waterfall(p, w, ph + AXIS_H + PLAN_H, h - ph - AXIS_H - PLAN_H)
         self._paint_markers(p, f, w, h)
         p.end()
 
@@ -232,16 +273,16 @@ class SpectrumView(QWidget):
             p.drawLine(0, int(y), w, int(y))
         n = len(self._level)
         xs = np.linspace(0, w, w if w < n else n)
-        ys = np.interp(xs, np.linspace(0, w, n), self._level)
+        ys = np.interp((n - 1) / 2 + (xs / w - 0.5) * (n - 1) / self._zoom, np.arange(n), self._level)
         pts = [QPointF(0, ph)] + [QPointF(float(x), float(ph - 2 - y * (ph - 6))) for x, y in zip(xs, ys, strict=True)]
         pts.append(QPointF(w, ph))
-        fill = QColor("#3ddc97")
+        fill = QColor(self._trace_color)
         fill.setAlpha(60)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(fill)
         p.drawPolygon(QPolygonF(pts))
         p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QPen(QColor("#3ddc97"), 1.2))
+        p.setPen(QPen(self._trace_color, 1.2))
         p.drawPolyline(QPolygonF(pts[1:-1]))
 
     def _paint_axis(self, p: QPainter, f: SpectrumFrame, w: int, ph: int) -> None:
@@ -249,10 +290,11 @@ class SpectrumView(QWidget):
         font = QFont(self.font())
         font.setPixelSize(11)
         p.setFont(font)
-        step = nice_step(f.span_hz)
-        lo = f.center_hz - f.span_hz / 2
+        vspan = f.span_hz / self._zoom
+        step = nice_step(vspan)
+        lo = f.center_hz - vspan / 2
         hz = int(np.ceil(lo / step) * step)
-        while hz <= f.center_hz + f.span_hz / 2:
+        while hz <= f.center_hz + vspan / 2:
             x = self._x_of(hz)
             p.setPen(QPen(QColor("#22324f"), 1))
             p.drawLine(int(x), 0, int(x), ph + 4)
@@ -263,19 +305,36 @@ class SpectrumView(QWidget):
             hz += step
 
     def _paint_plan(self, p: QPainter, f: SpectrumFrame, w: int, ph: int) -> None:
-        lo, hi = f.center_hz - f.span_hz / 2, f.center_hz + f.span_hz / 2
-        y = ph + AXIS_H - PLAN_H
+        vspan = f.span_hz / self._zoom
+        lo, hi = f.center_hz - vspan / 2, f.center_hz + vspan / 2
+        y = ph + AXIS_H
+        font = QFont(self.font())
+        font.setPixelSize(10)
+        font.setBold(True)
+        p.setFont(font)
+        fm = QFontMetricsF(font)
         for seg in self._plan:
             if seg.hi < lo or seg.lo > hi:
                 continue
             x1, x2 = self._x_of(max(seg.lo, lo)), self._x_of(min(seg.hi, hi))
-            p.fillRect(QRectF(x1, y, max(1.0, x2 - x1), PLAN_H), QColor(PLAN_COLORS.get(seg.kind, PLAN_OTHER_COLOR)))
+            rect = QRectF(x1, y, max(1.0, x2 - x1), PLAN_H)
+            p.fillRect(rect, QColor(PLAN_COLORS.get(seg.kind, PLAN_OTHER_COLOR)))
+            p.setPen(QPen(QColor("#050a14"), 1))                      # thin separator between neighbouring segments
+            p.drawLine(QPointF(rect.left(), y), QPointF(rect.left(), y + PLAN_H))
+            labels = PLAN_LABELS.get(seg.kind, PLAN_OTHER_LABELS)
+            # label sits in the visible part of the segment; pick the longest text that fits
+            vis_l, vis_r = max(rect.left(), 0.0), min(rect.right(), float(w))
+            label = next((s for s in labels if fm.horizontalAdvance(s) + 6 <= vis_r - vis_l), None)
+            if label:
+                p.setPen(QColor("#ffffff"))
+                p.drawText(QRectF(vis_l, y, vis_r - vis_l, PLAN_H), Qt.AlignmentFlag.AlignCenter, label)
 
     def _paint_spots(self, p: QPainter, f: SpectrumFrame, w: int, ph: int) -> None:
         self._spot_boxes = []
         if not self.show_spots or not self._spots:
             return
-        lo, hi = f.center_hz - f.span_hz / 2, f.center_hz + f.span_hz / 2
+        vspan = f.span_hz / self._zoom
+        lo, hi = f.center_hz - vspan / 2, f.center_hz + vspan / 2
         font = QFont(self.font())
         font.setPixelSize(10)
         p.setFont(font)
@@ -325,7 +384,7 @@ class SpectrumView(QWidget):
         if rect is None:
             return
         bw = float(self._cw_bw)
-        half = min(window_half_width(bw), f.span_hz / 2.0)
+        half = min(window_half_width(bw), f.span_hz / self._zoom / 2.0)
         n, bar_h = 21, self.CW_BAR_H
         top = rect.top() + 3
         x0, x1 = rect.left(), rect.right()
@@ -365,7 +424,8 @@ class SpectrumView(QWidget):
         rows, n = self._wf.shape
         img = QImage(self._wf.data, n, rows, n * 4, QImage.Format.Format_ARGB32)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        p.drawImage(QRectF(0, top, w, height), img)
+        vis = n / self._zoom
+        p.drawImage(QRectF(0, top, w, height), img, QRectF((n - vis) / 2, 0, vis, rows))
 
     def _paint_markers(self, p: QPainter, f: SpectrumFrame, w: int, h: int) -> None:
         if self._passband is not None:

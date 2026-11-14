@@ -98,3 +98,12 @@ def load_flag(name: str, default: bool = True) -> bool:
 
 def save_flag(name: str, on: bool) -> None:
     qsettings().setValue("flag_" + name, "true" if on else "false")
+
+
+def load_choice(name: str, default: str) -> str:
+    v = qsettings().value("choice_" + name)
+    return default if v is None else str(v)
+
+
+def save_choice(name: str, value: str) -> None:
+    qsettings().setValue("choice_" + name, value)

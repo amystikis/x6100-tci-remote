@@ -1,0 +1,65 @@
+name: Release
+
+# Runs on every push to main. If the version in pyproject.toml has no GitHub release yet, it builds the .deb and the
+# Windows zip and publishes release v<version> with both attached. Bump `version` in pyproject.toml to trigger one.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      needed: ${{ steps.v.outputs.needed }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver=$(python3 -c "import re;print(re.search(r'^version = \"([^\"]+)\"', open('pyproject.toml').read(), re.M).group(1))")
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          if gh release view "v$ver" >/dev/null 2>&1; then echo "needed=false" >> "$GITHUB_OUTPUT"; else echo "needed=true" >> "$GITHUB_OUTPUT"; fi
+
+  deb:
+    needs: check
+    if: needs.check.outputs.needed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: packaging/build_deb.sh
+      - uses: actions/upload-artifact@v4
+        with: { name: deb, path: "build/*.deb" }
+
+  windows:
+    needs: check
+    if: needs.check.outputs.needed == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: powershell -ExecutionPolicy Bypass -File packaging/build_windows.ps1
+      - uses: actions/upload-artifact@v4
+        with: { name: windows, path: "build/*_windows.zip" }
+
+  publish:
+    needs: [check, deb, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: assets, merge-multiple: true }
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=${{ needs.check.outputs.version }}
+          # notes = the CHANGELOG section for this version, if present
+          awk -v v="$v" '$0 ~ "^## "v"$" {f=1; next} /^## / {f=0} f' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "Release $v" > notes.md
+          gh release create "v$v" assets/* --title "v$v" --notes-file notes.md --target "$GITHUB_SHA"
