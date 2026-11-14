@@ -1,8 +1,13 @@
 # Changelog
 
+## 0.3.1
+
+- Descriptions (About, README, `.deb`, app menu entry) now say the Xiegu X6100 and X6200.
+- CW tuner indicator is steadier: heavier averaging, the readout refreshes about 3 times a second, the last reading is held for 2 s when the signal pauses, and the bars are peak-held and fall slowly.
+- README updated with the new features and a new screenshot taken from a live radio.
+
 ## 0.3.0
 
-- CW tuner indicator is steadier: heavier averaging, the readout refreshes about 3 times a second, the last reading is held for 2 s when the signal pauses, and the bars are peak-held and fall slowly.
 - `.deb`: real maintainer (Apostolis Mystikis, M7SVA), homepage and a fuller description.
 - Windows: install instructions, a PyInstaller build script (`packaging/build_windows.ps1`) and a Windows CI job that runs the tests and builds the zip.
 - Spectrum and waterfall zoom (1x, 2x, 4x, 8x) next to the frequency step. It is a display zoom of the middle of the radio's 100 kHz span (the panel protocol has no span command), so the resolution does not improve; the choice is remembered.

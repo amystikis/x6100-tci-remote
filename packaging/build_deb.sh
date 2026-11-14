@@ -40,8 +40,8 @@ Depends: $DEPENDS
 Recommends: $RECOMMENDS
 Maintainer: Apostolis Mystikis (M7SVA) <164936959+amystikis@users.noreply.github.com>
 Homepage: https://github.com/amystikis/x6100-tci-remote
-Description: Remote controller for the Xiegu X6100 (OpenX6X00 firmware) over TCI
- A desktop app for the Xiegu X6100 running the OpenX6X00 firmware
+Description: Remote controller for the Xiegu X6100 and X6200 (OpenX6X00 firmware) over TCI
+ A desktop app for the Xiegu X6100 and X6200 running the OpenX6X00 firmware
  (https://openx6x00.org/). It works only with that firmware. It talks to the
  radio's TCI WebSocket server to tune, change mode and filter, listen to the receiver
  audio and (optionally, guarded) transmit, and to the radio's panel server for the

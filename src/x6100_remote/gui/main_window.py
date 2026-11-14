@@ -568,7 +568,7 @@ class MainWindow(QMainWindow):
     def show_about(self) -> None:
         QMessageBox.about(self, "About X6100 TCI Remote", (
             "<h3>X6100 TCI Remote %s</h3>"
-            "<p>An independent desktop remote controller for the Xiegu X6100.</p>"
+            "<p>An independent desktop remote controller for the Xiegu X6100 and X6200.</p>"
             "<p><b>This app works only with the OpenX6X00 firmware</b> "
             "(<a href='https://openx6x00.org/'>https://openx6x00.org/</a>), which provides the TCI and panel "
             "servers it talks to. It does not work with the stock Xiegu firmware.</p>"

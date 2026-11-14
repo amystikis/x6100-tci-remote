@@ -8,7 +8,7 @@ import sys
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="x6100-tci-remote",
-                                 description="Desktop remote controller for the Xiegu X6100 (TCI)")
+                                 description="Desktop remote controller for the Xiegu X6100 and X6200 (TCI)")
     ap.add_argument("address", nargs="?", help="radio address, e.g. 192.168.0.150 or 192.168.0.150:50001")
     ap.add_argument("--demo", action="store_true", help="run against a built-in fake radio (no hardware)")
     ap.add_argument("--ptt", choices=["on", "off", "toggle"],
