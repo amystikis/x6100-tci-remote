@@ -6,6 +6,12 @@ audio, read the S-meter, see a **spectrum and waterfall** (click to tune), and (
 
 ![screenshot](docs/screenshot.png)
 
+Themes (Settings > Theme): Midnight (above), Dark, Light and Night red. The pictures are taken with the built-in demo radio.
+
+| Light | Night red |
+| --- | --- |
+| ![Light theme](docs/screenshot-light.png) | ![Night red theme](docs/screenshot-night.png) |
+
 ## Status
 
 - **Version 0.3.4.** The author has tested it against a real X6100 (OpenX6X00 firmware; the X6200 is expected to work
