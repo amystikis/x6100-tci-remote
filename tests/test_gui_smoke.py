@@ -1,5 +1,6 @@
 """GUI tests run headless (QT_QPA_PLATFORM=offscreen) against the fake radio."""
 import asyncio
+import re
 import os
 import time
 
@@ -141,7 +142,7 @@ def test_panel_info_shows_in_window(env):
     win.w.send("modulation", 0, "cw")
     pump(lambda: not win.cw_box.isHidden())
     assert "CQ CQ DE" in win.cw_view.toPlainText()
-    assert win.cw_view.height() == 54
+    assert win.cw_view.height() == 78
     assert len(win.spectrum._plan) == 4 and len(win.spectrum._spots) == 5
     win.spots_act.setChecked(False)
     assert win.spectrum.show_spots is False
@@ -334,7 +335,7 @@ def test_zoom_and_colour_schemes(env):
 
 def test_clock_connection_settings_and_status_bar(env):
     win, _radio, _pump = env
-    assert win.clock.text().endswith(" UTC")
+    assert re.fullmatch(r"\d\d:\d\d:\d\d", win.clock.text()) and win.utc_lbl.text() == "UTC"
     assert win.addr.window() is win.settings_dlg and win.connect_btn.window() is win.settings_dlg
     assert win.settings_tabs.tabText(0) == "Connection"
     assert win.status.parent() is win.statusBar()
@@ -359,3 +360,92 @@ def test_autoconnect_to_the_last_radio_and_zoom_starts_at_1x(env):
     win3 = MainWindow(TciWorker())
     assert not win3.auto_connect_last() and win3.connect_btn.text() == "Connect"
     win3.close()
+
+
+def test_transmit_box_can_be_hidden_and_is_remembered(env):
+    win, radio, pump = env
+    assert win.tx_box.isVisible()
+    win.view_transmit_act.setChecked(False)
+    assert not win.tx_box.isVisible() and not win.ptt.isVisible()
+    from x6100_remote.gui.settings import load_flag
+    assert load_flag("show_transmit") is False
+    win.view_transmit_act.setChecked(True)
+    assert win.tx_box.isVisible()
+
+
+def test_themes_switch_and_are_remembered(env):
+    from x6100_remote.gui import widgets
+    from x6100_remote.gui.settings import load_choice
+    from x6100_remote.gui.themes import THEMES
+    win, radio, pump = env
+    assert {"Light", "Dark", "Midnight", "Night red"} <= set(THEMES)
+    for name, theme in THEMES.items():
+        win.set_theme(name)
+        assert theme.bg in win.styleSheet() and widgets.AMBER.name() == theme.accent
+        assert load_choice("theme", "") == name
+    win.set_theme("nonsense")                      # unknown names are ignored
+    assert win.theme_name == "Night red"
+    win.set_theme("Midnight")
+
+
+def test_cw_clear_stays_cleared(env):
+    win, radio, pump = env
+    win.w.info.cw_text = "CQ CQ DE M7SVA"
+    win.on_panel_info("cw")
+    assert "CQ" in win.cw_view.toPlainText()
+    win.clear_cw()
+    win.on_panel_info("cw")                      # the next message must not bring the old text back
+    assert win.cw_view.toPlainText() == "" and win.w.info.cw_text == ""
+
+
+def test_am_passband_is_drawn_on_both_sides(env):
+    win, radio, pump = env
+    win.state.mode, win.state.filter_lo, win.state.filter_hi = "am", 0, 6000
+    win.refresh("filter")
+    assert win.spectrum._passband == (-6000, 6000)
+    win.state.mode, win.state.filter_lo, win.state.filter_hi = "usb", 300, 2700
+    win.refresh("filter")
+    assert win.spectrum._passband == (300, 2700)
+
+
+def test_spectrum_trace_auto_floor(env):
+    import numpy as np
+    win, radio, pump = env
+    sp = win.spectrum
+    level = np.full(100, 0.3, dtype=np.float32)
+    level[50] = 0.9
+    sp._tr_med = 0.3
+    sp.set_trace_floor(True, 0.0)
+    y = sp._trace_levels(level)
+    assert y[0] == 0.0 and y[50] > 0.8                  # noise sits at the bottom, the signal stands out
+    sp.set_trace_floor(False, 0.0)
+    assert sp._trace_levels(level)[0] == pytest.approx(0.3)
+
+
+def test_fullscreen_toggle(env):
+    win, radio, pump = env
+    win.toggle_fullscreen()
+    assert win.isFullScreen() and win.fullscreen_act.isChecked() and "Exit" in win.fullscreen_btn.text()
+    win.toggle_fullscreen()
+    assert not win.isFullScreen() and not win.fullscreen_act.isChecked()
+
+
+def test_connect_button_and_pair_state_in_connection_settings(env):
+    win, radio, pump = env
+    pump(lambda: win.connect_btn.text() == "Disconnect")
+    assert win.pair_btn2.window() is win.settings_dlg
+    win.on_status("disconnected", "")
+    assert win.connect_btn.text() == "Connect"
+    win.on_status("connected", "")
+    assert win.connect_btn.text() == "Disconnect"
+    win._panel_up = True
+    win._update_pair_state()
+    assert win.pair_btn2.isEnabled() and "Not paired" in win.pair_state.text()
+
+
+def test_spot_colour_choice(env):
+    win, radio, pump = env
+    win._spot_scheme_chosen("Red")
+    assert win.spectrum._spot_color == "#ff5a5a"
+    win._spot_scheme_chosen("By mode")
+    assert win.spectrum._spot_color is None

@@ -328,3 +328,9 @@ def test_saved_key_authenticates_a_new_connection():
             await c2.close()
             task2.cancel()
     asyncio.run(_with_panel(body))
+
+
+def test_spectrum_colours_include_red():
+    pytest.importorskip("PySide6")
+    from x6100_remote.gui.spectrum_view import SPECTRUM_SCHEMES
+    assert SPECTRUM_SCHEMES["Red"] == "#ff5a5a"

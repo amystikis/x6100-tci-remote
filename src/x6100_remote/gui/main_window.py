@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timezone
 
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QAction, QFont, QKeyEvent
+from PySide6.QtGui import QAction, QActionGroup, QFont, QKeyEvent
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDockWidget, QFormLayout, QFrame, QGridLayout, QGroupBox,
                                QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMessageBox, QPlainTextEdit,
                                QPushButton, QSlider, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
@@ -19,9 +19,10 @@ from .audio import AVAILABLE as AUDIO_OK, MicSource, RxAudio
 from .settings import (load_band_memory, load_choice, load_flag, load_panel_token, load_radios, load_show_spectrum,
                        load_window_geometry, panel_url_for, parse_target, remember_radio, save_band_memory,
                        save_choice, save_flag, save_panel_token, save_show_spectrum, save_window_geometry)
-from .spectrum_view import (DEFAULT_SPECTRUM, DEFAULT_WATERFALL, SPECTRUM_SCHEMES, WATERFALL_SCHEMES,
-                            ZOOM_LEVELS, SpectrumView)
-from .widgets import AMBER, FrequencyDisplay, SMeter
+from .spectrum_view import (DEFAULT_SPECTRUM, DEFAULT_SPOTS, DEFAULT_WATERFALL, SPECTRUM_SCHEMES, SPOT_SCHEMES,
+                            WATERFALL_SCHEMES, ZOOM_LEVELS, SpectrumView)
+from .themes import DEFAULT_THEME, THEMES, build_style
+from .widgets import FrequencyDisplay, SMeter, apply_palette
 from .worker import TciWorker
 
 # name, lo Hz, hi Hz, default Hz, default mode
@@ -37,31 +38,9 @@ MODE_LABELS = {"lsb": "LSB", "usb": "USB", "cw": "CW", "cwr": "CWR", "am": "AM",
                "digl": "DIGL", "digu": "DIGU", "dsb": "DSB", "wfm": "WFM"}
 STEPS = [("1 Hz", 1), ("10 Hz", 10), ("100 Hz", 100), ("500 Hz", 500), ("1 kHz", 1000),
          ("5 kHz", 5000), ("9 kHz", 9000), ("10 kHz", 10000), ("100 kHz", 100000)]
+DOUBLE_SIDEBAND_MODES = ("am", "dsb", "nfm", "wfm")      # passband is symmetric around the carrier
 AGC_MODES = ["off", "long", "slow", "normal", "fast"]
 CW_PITCH = 700
-
-STYLE = """
-QWidget { background:#0b1220; color:#dbe4f3; font-size:13px; }
-QGroupBox { border:1px solid #22324f; border-radius:8px; margin-top:12px; padding-top:8px; }
-QGroupBox::title { subcontrol-origin: margin; left:10px; padding:0 4px; color:#8ea0bd; }
-QPushButton { background:#1b2a44; border:1px solid #2a3a58; border-radius:6px; padding:6px 10px; }
-QPushButton:hover { background:#24365a; }
-QPushButton:checked { background:#f0a830; color:#1a1204; border-color:#f0a830; font-weight:600; }
-QPushButton:disabled { color:#55637d; background:#121c30; }
-QPushButton#ptt { background:#5a1f1f; border-color:#8a2d2d; font-weight:700; padding:12px; }
-QPushButton#ptt:pressed { background:#d42f2f; }
-QPushButton#ptt:disabled { background:#241618; border-color:#3a2326; }
-QLineEdit, QComboBox, QSpinBox, QPlainTextEdit {
-  background:#0e1626; border:1px solid #2a3a58; border-radius:6px; padding:4px 6px; }
-QLabel#tx_banner { background:#d42f2f; color:white; font-weight:700; padding:4px; border-radius:6px; }
-QFrame#tx_group { border:1px solid #5a2d2d; border-radius:8px; }
-QCheckBox::indicator { width:16px; height:16px; border:1px solid #3a4c6e; border-radius:4px; background:#0e1626; }
-QCheckBox::indicator:checked { background:#f0a830; border-color:#f0a830; }
-QCheckBox::indicator:disabled { border-color:#2a3350; background:#0b1220; }
-QPushButton[on="true"] { background:#1f3d33; border-color:#3ddc97; color:#bff5dc; }
-QSlider::groove:horizontal { height:6px; background:#22324f; border-radius:3px; }
-QSlider::handle:horizontal { background:#f0a830; width:14px; margin:-5px 0; border-radius:7px; }
-"""
 
 
 def _btn(text: str, checkable: bool = False, slot=None) -> QPushButton:
@@ -77,7 +56,12 @@ class MainWindow(QMainWindow):
     def __init__(self, worker: TciWorker | None = None) -> None:
         super().__init__()
         self.setWindowTitle("X6100 TCI Remote")
-        self.setStyleSheet(STYLE)
+        self._panel_up = False
+        self.theme_name = load_choice("theme", DEFAULT_THEME)
+        if self.theme_name not in THEMES:
+            self.theme_name = DEFAULT_THEME
+        apply_palette(THEMES[self.theme_name])
+        self.setStyleSheet(build_style(THEMES[self.theme_name]))
         self.w = worker or TciWorker()
         self.rx = RxAudio()
         self.mic = MicSource()
@@ -96,25 +80,10 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(8, 6, 8, 6)
         v.setSpacing(4)
 
-        # top row: UTC clock, top right ---------------------------------------------
-        top = QHBoxLayout()
-        top.addStretch(1)
-        self.clock = QLabel("")
-        cf = QFont(self.font())
-        cf.setFamilies(["DejaVu Sans Mono", "Liberation Mono", "Consolas", "Menlo", "Courier New", "monospace"])
-        cf.setStyleHint(QFont.StyleHint.Monospace)
-        cf.setPointSize(26)
-        cf.setWeight(QFont.Weight.DemiBold)
-        self.clock.setFont(cf)
-        self.clock.setStyleSheet("color:%s" % AMBER.name())          # same colour as the frequency digits
-        self.clock.setToolTip("Coordinated Universal Time (UTC)")
-        top.addWidget(self.clock)
-        v.addLayout(top)
         self.clock_timer = QTimer(self)
         self.clock_timer.setInterval(500)
         self.clock_timer.timeout.connect(self._tick_clock)
         self.clock_timer.start()
-        self._tick_clock()
 
         # connection widgets live in Settings > Connection; the status is in the status bar at the bottom ---------
         self.addr = QComboBox()
@@ -133,10 +102,38 @@ class MainWindow(QMainWindow):
         self.freq = FrequencyDisplay()
         self.freq.tune.connect(self.tune_by)
         self.freq.entered.connect(self.type_frequency)
-        v.addWidget(self.freq)
+        # the UTC clock sits in its own box to the right of the frequency
+        self.clock_box = QFrame()
+        self.clock_box.setObjectName("clock_box")
+        cbl = QVBoxLayout(self.clock_box)
+        cbl.setContentsMargins(14, 4, 14, 4)
+        cbl.setSpacing(0)
+        self.clock = QLabel("")
+        cf = QFont(self.font())
+        cf.setFamilies(["DejaVu Sans Mono", "Liberation Mono", "Consolas", "Menlo", "Courier New", "monospace"])
+        cf.setStyleHint(QFont.StyleHint.Monospace)
+        cf.setPointSize(24)
+        cf.setWeight(QFont.Weight.DemiBold)
+        self.clock.setFont(cf)
+        self.clock.setObjectName("clock")          # coloured like the frequency digits by the theme
+        self.clock.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.utc_lbl = QLabel("UTC")
+        self.utc_lbl.setObjectName("utc_lbl")
+        self.utc_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        cbl.addStretch(1)
+        cbl.addWidget(self.clock)
+        cbl.addWidget(self.utc_lbl)
+        cbl.addStretch(1)
+        self.clock_box.setToolTip("Coordinated Universal Time (UTC)")
+        vfo_row = QHBoxLayout()
+        vfo_row.setSpacing(10)
+        vfo_row.addWidget(self.freq, 1)
+        vfo_row.addWidget(self.clock_box)
+        v.addLayout(vfo_row)
+        self._tick_clock()
         info = QHBoxLayout()
         self.info = QLabel("")
-        self.info.setStyleSheet("color:#8ea0bd")
+        self.info.setObjectName("info")
         info.addWidget(self.info)
         info.addStretch(1)
         self.step = QComboBox()
@@ -154,6 +151,10 @@ class MainWindow(QMainWindow):
         info.addSpacing(12)
         info.addWidget(QLabel("Zoom"))
         info.addWidget(self.zoom)
+        info.addSpacing(12)
+        self.fullscreen_btn = _btn("⛶ Full screen", slot=self.toggle_fullscreen)
+        self.fullscreen_btn.setToolTip("Full screen without window borders (F11; Esc to leave)")
+        info.addWidget(self.fullscreen_btn)
         v.addLayout(info)
         self.status_strip = QLabel("")
         self.status_strip.setTextFormat(Qt.TextFormat.RichText)
@@ -169,16 +170,18 @@ class MainWindow(QMainWindow):
         self.spectrum.set_waterfall_scheme(self.wf_scheme())
         self.spectrum.set_spectrum_scheme(self.sp_scheme())
         self.spectrum.set_noise_floor(*self.noise_floor_settings())
+        self.spectrum.set_trace_floor(*self.trace_floor_settings())
+        self.spectrum.set_spot_scheme(self.spot_scheme())
         self.cw_box = QGroupBox("CW decoder (decoded by the radio)")
         cwl = QHBoxLayout(self.cw_box)
         cwl.setContentsMargins(8, 2, 8, 4)
         self.cw_view = QPlainTextEdit()
         self.cw_view.setReadOnly(True)
-        self.cw_view.setFixedHeight(54)          # 2 lines
+        self.cw_view.setFixedHeight(78)          # 3 lines
         self.cw_view.setMaximumBlockCount(500)
-        self.cw_view.setStyleSheet("font-family:monospace; font-size:14px; color:#f0a830;")
+        self.cw_view.setObjectName("cw_view")
         cwl.addWidget(self.cw_view, 1)
-        cwl.addWidget(_btn("Clear", slot=self.cw_view.clear))
+        cwl.addWidget(_btn("Clear", slot=self.clear_cw))
         self.cw_box.hide()
         v.addWidget(self.cw_box)
         self.smeter = SMeter()
@@ -256,7 +259,6 @@ class MainWindow(QMainWindow):
         keys_l.addWidget(self.pair_btn)
         keys_l.addStretch(1)
         g.addLayout(keys_l, 2, 0, 1, 7)
-        self._panel_up = False
         v.addWidget(rx)
 
         # audio -------------------------------------------------------------------
@@ -346,7 +348,8 @@ class MainWindow(QMainWindow):
         m.addAction(act)
         m.addSeparator()
         for key, label, box in (("band", "Band", self.band_box), ("mode", "Mode", self.modes_box),
-                                ("receiver", "Receiver", self.rx_box), ("audio", "Audio", self.audio_box)):
+                                ("receiver", "Receiver", self.rx_box), ("audio", "Audio", self.audio_box),
+                                ("transmit", "Transmit / PTT", self.tx_box)):
             act = QAction(label, self)
             act.setCheckable(True)
             act.setChecked(load_flag("show_" + key))
@@ -355,6 +358,11 @@ class MainWindow(QMainWindow):
             m.addAction(act)
             setattr(self, "view_" + key + "_act", act)
         m.addSeparator()
+        self.fullscreen_act = QAction("Full screen", self)
+        self.fullscreen_act.setShortcut("F11")
+        self.fullscreen_act.setCheckable(True)
+        self.fullscreen_act.triggered.connect(self.toggle_fullscreen)
+        m.addAction(self.fullscreen_act)
         self.cw_tuner_act = QAction("CW tuner indicator", self)
         self.cw_tuner_act.setCheckable(True)
         self.cw_tuner_act.setChecked(load_flag("cw_tuner"))
@@ -369,6 +377,15 @@ class MainWindow(QMainWindow):
         self.spectrum.setVisible(self.spectrum_act.isChecked())
         sm = self.menuBar().addMenu("&Settings")
         sm.addAction("Settings...", self.open_settings)
+        tm = sm.addMenu("Theme")
+        group = QActionGroup(self)
+        for name in THEMES:
+            act = QAction(name, self)
+            act.setCheckable(True)
+            act.setChecked(name == self.theme_name)
+            act.triggered.connect(lambda _=False, n=name: self.set_theme(n))
+            group.addAction(act)
+            tm.addAction(act)
         h = self.menuBar().addMenu("&Help")
         about = QAction("About", self)
         about.triggered.connect(self.show_about)
@@ -432,7 +449,11 @@ class MainWindow(QMainWindow):
                 # tuned signal sits, and switch the CW tuner bars on
                 self._apply_cw_tuner(st.mode, bw)
             else:
-                self.spectrum.set_passband(st.filter_lo, st.filter_hi)
+                lo, hi = st.filter_lo, st.filter_hi
+                if st.mode in DOUBLE_SIDEBAND_MODES:
+                    # the carrier is in the middle: the radio reports one sideband's width, so show both sides
+                    lo, hi = -max(abs(lo), abs(hi)), max(abs(lo), abs(hi))
+                self.spectrum.set_passband(lo, hi)
                 self.spectrum.set_cw_tuner(None)
             self._update_cw_visibility()
         if what in ("", "agc"):
@@ -452,7 +473,8 @@ class MainWindow(QMainWindow):
         if what in ("", "trx"):
             self.tx_banner.setVisible(st.trx)
         if what in ("", "device", "protocol", "ready"):
-            self.info.setText("%s  %s" % (st.device, st.protocol))
+            self.info.setText(st.device)
+            self.info.setToolTip("TCI protocol: %s" % st.protocol if st.protocol else "")
 
     def _build_modes(self) -> None:
         names = self.state.modulations or ["lsb", "usb", "cw", "am", "nfm"]
@@ -566,19 +588,31 @@ class MainWindow(QMainWindow):
         QMessageBox.about(self, "About X6100 TCI Remote", (
             "<h3>X6100 TCI Remote %s</h3>"
             "<p>An independent desktop remote controller for the Xiegu X6100 and X6200.</p>"
-            "<p><b>This app works only with the OpenX6X00 firmware</b> "
+            "<p>This app is <b>not affiliated with OpenX6X00</b>. It works alongside the OpenX6X00 firmware "
             "(<a href='https://openx6x00.org/'>https://openx6x00.org/</a>), which provides the TCI and panel "
-            "servers it talks to. It does not work with the stock Xiegu firmware.</p>"
-            "<p>Credits to <b>RF.Guru (Joeri Van Dooren ON6URE)</b> and all who are contributing to this "
-            "open-source firmware for the radio.</p>"
-            "<p>Licensed under LGPL-2.1-or-later.</p>") % __version__)
+            "servers it talks to, and works only with that firmware, not with the stock Xiegu firmware.</p>"
+            "<p><b>Credits:</b> thanks to <b>all the authors and contributors of OpenX6X00</b>, including "
+            "RF.Guru (Joeri Van Dooren ON6URE), for their open-source firmware.</p>"
+            "<p>Free and open for anyone to use and develop (LGPL-2.1-or-later). "
+            "<b>You are responsible for what goes on air.</b></p>"
+            "<p>Bugs and reports: <a href='https://github.com/amystikis/x6100-tci-remote'>"
+            "https://github.com/amystikis/x6100-tci-remote</a></p>") % __version__)
 
     def _tick_clock(self) -> None:
-        self.clock.setText(datetime.now(timezone.utc).strftime("%H:%M:%S UTC"))
+        self.clock.setText(datetime.now(timezone.utc).strftime("%H:%M:%S"))
 
     def _waterfall_scheme_chosen(self, name: str) -> None:
         save_choice("waterfall_scheme", name)
         self.spectrum.set_waterfall_scheme(name)
+
+    @staticmethod
+    def spot_scheme() -> str:
+        name = load_choice("spot_scheme", DEFAULT_SPOTS)
+        return name if name in SPOT_SCHEMES else DEFAULT_SPOTS
+
+    def _spot_scheme_chosen(self, name: str) -> None:
+        save_choice("spot_scheme", name)
+        self.spectrum.set_spot_scheme(name)
 
     def _spectrum_scheme_chosen(self, name: str) -> None:
         save_choice("spectrum_scheme", name)
@@ -592,6 +626,13 @@ class MainWindow(QMainWindow):
         except ValueError:
             return True, 0.0, 1.0
 
+    @staticmethod
+    def trace_floor_settings() -> tuple[bool, float]:
+        try:
+            return load_choice("tr_auto", "1") != "0", float(load_choice("tr_offset", "0"))
+        except ValueError:
+            return True, 0.0
+
     def _build_settings_dialog(self) -> None:
         """Settings dialog: 'Connection' (radio address + connect) and 'Display' (colour schemes, applied at once)."""
         dlg = self.settings_dlg = QDialog(self)
@@ -601,11 +642,23 @@ class MainWindow(QMainWindow):
         lay.addWidget(tabs)
 
         conn = QWidget()
-        cl = QHBoxLayout(conn)
+        cv = QVBoxLayout(conn)
+        cl = QHBoxLayout()
         cl.addWidget(QLabel("Radio"))
         cl.addWidget(self.addr, 1)
         cl.addWidget(self.connect_btn)
+        cv.addLayout(cl)
+        pl = QHBoxLayout()
+        self.pair_state = QLabel("")
+        pl.addWidget(QLabel("Radio keys"))
+        pl.addWidget(self.pair_state, 1)
+        self.pair_btn2 = _btn("Pair...", slot=self.pair_panel)
+        self.pair_btn2.setToolTip("Pair this app with the radio (6-digit code shown on the radio's screen)")
+        pl.addWidget(self.pair_btn2)
+        cv.addLayout(pl)
+        cv.addStretch(1)
         tabs.addTab(conn, "Connection")
+        self._update_pair_state()
 
         page = QWidget()
         form = QFormLayout(page)
@@ -618,6 +671,11 @@ class MainWindow(QMainWindow):
         sp.currentTextChanged.connect(self._spectrum_scheme_chosen)
         form.addRow("Waterfall colours", wf)
         form.addRow("Spectrum colour", sp)
+        spots = QComboBox()
+        spots.addItems(list(SPOT_SCHEMES))
+        spots.setCurrentText(self.spot_scheme())
+        spots.currentTextChanged.connect(self._spot_scheme_chosen)
+        form.addRow("DX call-sign colour", spots)
         auto = QCheckBox("Auto noise floor (follows the noise by itself)")
         floor, contrast = QSlider(Qt.Orientation.Horizontal), QSlider(Qt.Orientation.Horizontal)
         floor.setRange(-10, 30)
@@ -642,6 +700,27 @@ class MainWindow(QMainWindow):
         floor.valueChanged.connect(apply_noise_floor)
         contrast.valueChanged.connect(apply_noise_floor)
         show_values()
+        tr_auto, tr_floor, tr_lbl = (QCheckBox("Auto noise floor on the spectrum trace"),
+                                     QSlider(Qt.Orientation.Horizontal), QLabel())
+        tr_floor.setRange(-10, 30)
+        tr = self.trace_floor_settings()
+        tr_auto.setChecked(tr[0])
+        tr_floor.setValue(round(tr[1] * 100))
+
+        def apply_trace_floor() -> None:
+            tr_lbl.setText("%+d %%" % tr_floor.value())
+            save_choice("tr_auto", "1" if tr_auto.isChecked() else "0")
+            save_choice("tr_offset", str(tr_floor.value() / 100))
+            self.spectrum.set_trace_floor(tr_auto.isChecked(), tr_floor.value() / 100)
+        tr_auto.toggled.connect(apply_trace_floor)
+        tr_floor.valueChanged.connect(apply_trace_floor)
+        tr_lbl.setText("%+d %%" % tr_floor.value())
+        form.addRow(tr_auto)
+        row = QHBoxLayout()
+        row.addWidget(tr_floor, 1)
+        tr_lbl.setMinimumWidth(48)
+        row.addWidget(tr_lbl)
+        form.addRow("Spectrum floor", row)
         form.addRow(auto)
         for label, slider, value_lbl in (("Noise floor", floor, floor_lbl), ("Contrast", contrast, contrast_lbl)):
             row = QHBoxLayout()
@@ -649,12 +728,23 @@ class MainWindow(QMainWindow):
             value_lbl.setMinimumWidth(48)
             row.addWidget(value_lbl)
             form.addRow(label, row)
-        form.addRow(_btn("Reset", slot=lambda: (auto.setChecked(True), floor.setValue(0), contrast.setValue(100))))
+        form.addRow(_btn("Reset", slot=lambda: (auto.setChecked(True), floor.setValue(0), contrast.setValue(100),
+                                                tr_auto.setChecked(True), tr_floor.setValue(0))))
         tabs.addTab(page, "Display")
         lay.addWidget(_btn("Close", slot=lambda: dlg.accept()), 0, Qt.AlignmentFlag.AlignRight)
 
     def open_settings(self) -> None:
         self.settings_dlg.exec()
+
+    def set_theme(self, name: str) -> None:
+        if name not in THEMES:
+            return
+        self.theme_name = name
+        save_choice("theme", name)
+        apply_palette(THEMES[name])
+        self.setStyleSheet(build_style(THEMES[name]))
+        for w in (self.freq, self.smeter):
+            w.update()
 
     def _show_group(self, key: str, box: QGroupBox, on: bool) -> None:
         save_flag("show_" + key, on)
@@ -742,12 +832,24 @@ class MainWindow(QMainWindow):
             self.set_ptt(False)
             self.statusBar().showMessage("Auto-unkeyed: transmit time limit reached", 8000)
 
+    def toggle_fullscreen(self) -> None:
+        """Full screen without window borders; the same button, F11 and the View menu leave it again (also Esc)."""
+        on = not self.isFullScreen()
+        if on:
+            self.showFullScreen()
+        else:
+            self.showNormal()
+        self.fullscreen_act.setChecked(on)
+        self.fullscreen_btn.setText("⛶ Exit full screen" if on else "⛶ Full screen")
+
     # keyboard / focus -----------------------------------------------------------------------
     def keyPressEvent(self, e: QKeyEvent) -> None:
         k, big = e.key(), bool(e.modifiers() & Qt.KeyboardModifier.ShiftModifier)
         mult = 10 if big else 1
         if k in (Qt.Key.Key_Left, Qt.Key.Key_Right):
             self.tune_by((1 if k == Qt.Key.Key_Right else -1) * self.step.currentData() * mult)
+        elif k == Qt.Key.Key_Escape and self.isFullScreen():
+            self.toggle_fullscreen()
         elif k == Qt.Key.Key_Space and not e.isAutoRepeat():
             self.set_ptt(True)
         else:
@@ -769,6 +871,8 @@ class MainWindow(QMainWindow):
         self.set_ptt(False)
         if self.cmd_server is not None:
             self.cmd_server.stop()
+        if self.isFullScreen():
+            self.showNormal()                      # remember the normal window, not the full-screen size
         save_window_geometry(bytes(self.saveGeometry()))
         save_band_memory(self.band_mem)
         self.rx.stop()
@@ -833,6 +937,12 @@ class MainWindow(QMainWindow):
         self.spectrum.set_passband(int(target - bw / 2), int(target + bw / 2))
         self.spectrum.set_cw_tuner(bw, target)
 
+    def clear_cw(self) -> None:
+        """Clear the CW text. The decoder history lives in the worker's PanelInfo and is re-shown on every new
+        message, so it has to be emptied too or the old letters come straight back."""
+        self.w.info.cw_text = ""
+        self.cw_view.clear()
+
     def on_panel_info(self, kind: str) -> None:
         info = self.w.info
         if kind == "plan":
@@ -887,10 +997,23 @@ class MainWindow(QMainWindow):
             b.setEnabled(self._panel_up)
         self.atu_tune.setEnabled(self._panel_up and paired and self.tx_enable.isChecked() and not self._ptt_on)
         self.pair_btn.setVisible(self._panel_up and not paired)
+        self._update_pair_state()
         st = info.state
         self._set_on(self._key_buttons["PRE"], bool(st.get("pre")))
         self._set_on(self._key_buttons["ATU"], bool(st.get("atu")))
         self._set_on(self._key_buttons["AB"], bool(st.get("vfo")))
+
+    def _update_pair_state(self) -> None:
+        paired = self.w.info.role in ("operate", "admin")
+        if not self._panel_up:
+            text = "Not available (the panel server is not connected)"
+        elif paired:
+            text = "Paired (%s)" % self.w.info.role
+        else:
+            text = "Not paired: the radio keys (PRE, A/B, V/M, FST, ATU) are off"
+        self.pair_state.setText(text)
+        self.pair_btn2.setEnabled(self._panel_up)
+        self.pair_btn2.setText("Re-pair..." if paired else "Pair...")
 
     def press_key(self, key: str) -> None:
         self.w.press_key(key)
@@ -961,5 +1084,7 @@ class MainWindow(QMainWindow):
         self.status.setText("<span style='color:%s'>●</span> %s" % (colors[state], text))
         if state == "disconnected" and not detail:
             self.connect_btn.setText("Connect")
+        else:
+            self.connect_btn.setText("Disconnect")         # connected, connecting or retrying: the button cancels it
         if state == "connected":
             self.refresh("")

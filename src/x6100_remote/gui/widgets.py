@@ -7,12 +7,21 @@ from PySide6.QtWidgets import QWidget
 
 from ..tci.protocol import dbm_to_s
 
+# Palette of the custom-painted widgets; replaced by apply_palette() when the theme changes.
 AMBER = QColor("#f0a830")
 PANEL = QColor("#0e1626")
 EDGE = QColor("#22324f")
 DIM = QColor("#5b6b88")
 GREEN = QColor("#3ddc97")
 RED = QColor("#ff5a5a")
+METER_BG = QColor("#0a1120")
+PEAK = QColor("#dbe4f3")
+
+
+def apply_palette(t) -> None:
+    global AMBER, PANEL, EDGE, DIM, GREEN, RED, METER_BG, PEAK
+    AMBER, PANEL, EDGE, DIM = QColor(t.accent), QColor(t.panel), QColor(t.edge), QColor(t.dim)
+    GREEN, RED, METER_BG, PEAK = QColor(t.green), QColor(t.red), QColor(t.meter_bg), QColor(t.peak)
 
 
 def format_freq(hz: int) -> str:
@@ -145,7 +154,9 @@ class FrequencyDisplay(QWidget):
             if ch.isdigit():
                 r = digits[i]
                 if i == self._hover and not self.locked:
-                    p.fillRect(r.adjusted(1, 8, -1, -8), QColor(240, 168, 48, 38))
+                    hover = QColor(AMBER)
+                    hover.setAlpha(38)
+                    p.fillRect(r.adjusted(1, 8, -1, -8), hover)
                 p.setPen(DIM if self.locked else AMBER)
                 p.drawText(r, Qt.AlignmentFlag.AlignCenter, ch)
                 if self.hasFocus() and places[i] == self._selected_place:
@@ -181,14 +192,14 @@ class SMeter(QWidget):
         label, frac = dbm_to_s(self.dbm)
         bar = QRectF(10, 8, w - 150, 14)
         p.setPen(QPen(EDGE, 1))
-        p.setBrush(QColor("#0a1120"))
+        p.setBrush(METER_BG)
         p.drawRoundedRect(bar, 3, 3)
         fill = QRectF(bar.left(), bar.top(), bar.width() * frac, bar.height())
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(GREEN if frac <= 0.6 else AMBER if frac <= 0.8 else RED)
         p.drawRoundedRect(fill, 3, 3)
         x = bar.left() + bar.width() * self.peak
-        p.setPen(QPen(QColor("#dbe4f3"), 2))
+        p.setPen(QPen(PEAK, 2))
         p.drawLine(int(x), int(bar.top()), int(x), int(bar.bottom()))
         p.setPen(DIM)
         small = QFont(self.font())

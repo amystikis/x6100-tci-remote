@@ -26,6 +26,11 @@ PLAN_LABELS = {
 }
 PLAN_OTHER_LABELS = ("OTHER", "OTH")
 SPOT_COLORS = {"CW": "#f0a830", "SSB": "#4cc9f0"}
+SPOT_SCHEMES: dict[str, str | None] = {                                # DX call-sign colour (None: by mode)
+    "By mode": None, "Green": "#3ddc97", "Red": "#ff5a5a", "Cyan": "#4cc9f0", "Amber": "#f0a830", "White": "#e6edf7",
+    "Magenta": "#e879f9",
+}
+DEFAULT_SPOTS = "By mode"
 TICK_STEPS = (500, 1000, 2000, 2500, 5000, 10_000, 20_000, 50_000, 100_000, 250_000, 500_000)
 
 
@@ -38,12 +43,14 @@ WATERFALL_SCHEMES: dict[str, list[tuple[int, int, int]]] = {       # 5 evenly sp
     "Ice": [(5, 10, 30), (20, 60, 120), (60, 140, 200), (170, 220, 245), (255, 255, 255)],
 }
 SPECTRUM_SCHEMES: dict[str, str] = {                                   # trace colour
-    "Green": "#3ddc97", "Cyan": "#4cc9f0", "Amber": "#f0a830", "White": "#e6edf7", "Magenta": "#e879f9",
+    "Green": "#3ddc97", "Red": "#ff5a5a", "Cyan": "#4cc9f0", "Amber": "#f0a830", "White": "#e6edf7",
+    "Magenta": "#e879f9",
 }
 DEFAULT_WATERFALL = "Classic"
 DEFAULT_SPECTRUM = "Green"
 ZOOM_LEVELS = (1, 2, 4, 8)
 NF_MARGIN = 0.08                # auto noise floor: signals must stand this far (0..1) above the row's own noise floor
+TRACE_MARGIN = 0.04            # auto trace floor: the trace starts this far (0..1) above the noise floor
 NF_MANUAL = 0.25                # manual noise floor (auto off): the level that is shown as black
 
 
@@ -98,7 +105,10 @@ class SpectrumView(QWidget):
         self._wl: np.ndarray | None = None          # (rows, nbins) uint8 levels (so a colour scheme can be swapped)
         self._wmed: np.ndarray | None = None        # (rows,) smoothed noise floor (0..1) of each waterfall row
         self._nf_auto, self._nf_offset, self._nf_contrast = True, 0.0, 1.0
+        self._tr_auto, self._tr_offset = True, 0.0     # spectrum trace: auto noise floor and its trim
+        self._tr_med = 0.0                              # smoothed noise floor (0..1) of the trace
         self._zoom = 1
+        self._spot_color: str | None = None            # None: coloured by mode
         self._trace_color = QColor(SPECTRUM_SCHEMES[DEFAULT_SPECTRUM])
         self._level: np.ndarray | None = None
         self._frame: SpectrumFrame | None = None
@@ -165,6 +175,18 @@ class SpectrumView(QWidget):
             self._wf = self._shade(self._wl, self._wmed)
         self.update()
 
+    def set_trace_floor(self, auto: bool, offset: float = 0.0) -> None:
+        """Spectrum trace noise floor. ``auto``: the trace is drawn relative to its own noise floor (smoothed over
+        frames), so the noise sits at the bottom and signals stand out; ``offset`` (-0.1..0.3) trims it. With ``auto``
+        off the trace shows the raw levels shifted by ``offset``."""
+        self._tr_auto, self._tr_offset = bool(auto), float(offset)
+        self.update()
+
+    def _trace_levels(self, level: np.ndarray) -> np.ndarray:
+        floor = (self._tr_med + TRACE_MARGIN if self._tr_auto else 0.0) + self._tr_offset
+        floor = min(max(floor, 0.0), 0.9)
+        return np.clip((level - floor) / (1.0 - floor), 0.0, 1.0)
+
     def _shade(self, levels: np.ndarray, med: np.ndarray) -> np.ndarray:
         """Colours (0xFFRRGGBB) for waterfall levels (uint8 rows) with the noise floor applied."""
         x = levels.astype(np.float32) / 255.0
@@ -179,6 +201,10 @@ class SpectrumView(QWidget):
         self._bg = int(self._lut[0])
         if self._wl is not None:
             self._wf = self._shade(self._wl, self._wmed)
+        self.update()
+
+    def set_spot_scheme(self, name: str) -> None:
+        self._spot_color = SPOT_SCHEMES.get(name)
         self.update()
 
     def set_spectrum_scheme(self, name: str) -> None:
@@ -226,6 +252,8 @@ class SpectrumView(QWidget):
         self._wmed[0] = med
         self._wl[0] = lv
         self._wf[0] = self._shade(lv[None, :], self._wmed[:1])[0]
+        m = float(np.median(level))
+        self._tr_med = m if not self.frames else 0.9 * self._tr_med + 0.1 * m
         self._level, self._frame = level, frame
         self._track_cw(frame)
         self.frames += 1
@@ -329,7 +357,8 @@ class SpectrumView(QWidget):
             p.drawLine(0, int(y), w, int(y))
         n = len(self._level)
         xs = np.linspace(0, w, w if w < n else n)
-        ys = np.interp((n - 1) / 2 + (xs / w - 0.5) * (n - 1) / self._zoom, np.arange(n), self._level)
+        ys = np.interp((n - 1) / 2 + (xs / w - 0.5) * (n - 1) / self._zoom, np.arange(n),
+                       self._trace_levels(self._level))
         pts = [QPointF(0, ph)] + [QPointF(float(x), float(ph - 2 - y * (ph - 6))) for x, y in zip(xs, ys, strict=True)]
         pts.append(QPointF(w, ph))
         fill = QColor(self._trace_color)
@@ -411,7 +440,7 @@ class SpectrumView(QWidget):
                 continue                                       # no room (or under the CW meter): skip, never overlap
             lane_end[lane] = left + tw
             box = lane_box(lane)
-            color = QColor(SPOT_COLORS.get(spot.mode.upper(), "#a0a8b8"))
+            color = QColor(self._spot_color or SPOT_COLORS.get(spot.mode.upper(), "#a0a8b8"))
             color.setAlpha(255 if spot.age <= 20 else 140)
             stem = QColor(color)
             stem.setAlpha(110)

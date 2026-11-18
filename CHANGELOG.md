@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.4
+
+- `.deb`: the Qt/xcb system libraries (including `libxcb-cursor0`) are now hard dependencies instead of recommendations, so the app no longer fails to start with "Could not load the Qt platform plugin xcb" on a fresh install.
+- Themes: Settings > Theme with Midnight (the original look), Dark, Light and Night red (red tones only, to keep night vision). The spectrum and waterfall keep their dark scope in every theme. The choice is remembered.
+- View > Transmit / PTT shows or hides the whole transmit box.
+- Full screen without window borders: button next to Zoom, View > Full screen, F11; Esc leaves it.
+- The UTC clock is bigger and sits in its own box to the right of the frequency.
+- Spectrum: a Red trace colour, and an auto noise floor for the trace (with a trim slider) like the waterfall one, in Settings > Display.
+- DX call-sign colour choice in Settings > Display (by mode, or one colour for all).
+- In AM, DSB and FM the passband is drawn on both sides of the frequency marker.
+- CW decoder: the Clear button now stays cleared (the old text used to come back with the next message); the field is 3 lines tall.
+- Settings > Connection also shows the pairing state with a Pair button, and the Connect button turns into Disconnect while connected.
+- The device line under the frequency shows only the radio name (the TCI protocol name is in its tooltip).
+- Help > About: states that the app is not affiliated with OpenX6X00, credits all its authors and contributors, and points to the GitHub page for bugs and reports.
+- The Windows installer and zip are confirmed working on a real PC.
+
 ## 0.3.3
 
 - Waterfall noise floor: Settings > Display has an auto noise floor (on by default; the waterfall follows the noise floor and only signals light up), a noise-floor trim slider, a contrast slider and a reset button. They are remembered.

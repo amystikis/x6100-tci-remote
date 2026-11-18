@@ -1,4 +1,4 @@
 """X6100 TCI Remote - an independent desktop remote controller for the Xiegu X6100 and X6200
 running OpenX6X00 firmware (or any radio that serves the Expert Electronics TCI protocol)."""
 
-__version__ = "0.3.3"
+__version__ = "0.3.4"

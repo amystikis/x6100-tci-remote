@@ -8,7 +8,7 @@ audio, read the S-meter, see a **spectrum and waterfall** (click to tune), and (
 
 ## Status
 
-- **Version 0.3.3.** The author has tested it against a real X6100 (OpenX6X00 firmware; the X6200 is expected to work
+- **Version 0.3.4.** The author has tested it against a real X6100 (OpenX6X00 firmware; the X6200 is expected to work
   the same way but has not been tested): tuning and mode, spectrum and waterfall, pairing, the radio key buttons, the CW
   decoder text and the CW tuner indicator all work.
 - Automated tests run against a **fake radio** included in this repo (`x6100-tci-remote --demo`).
@@ -24,7 +24,7 @@ python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[gui]"          # or: pipx install ".[gui]"
 ```
 
-On Debian/Ubuntu, Qt may need `sudo apt install libxcb-cursor0` (error "could not load the Qt platform plugin xcb").
+On Debian/Ubuntu, a from-source install may need `sudo apt install libxcb-cursor0` (error "could not load the Qt platform plugin xcb"); the `.deb` installs it for you.
 
 ### Windows
 
@@ -45,7 +45,7 @@ To build the standalone folder, zip and installer yourself: `powershell -Executi
 (PyInstaller; writes `build\x6100-tci-remote_<version>_windows.zip`), then `packaging\build_msi.ps1` for the `.msi`
 (needs the .NET SDK; it installs WiX as a dotnet tool). The remote-PTT command (`x6100-tci-remote.exe --ptt toggle`)
 works from a shortcut or a hotkey tool such as AutoHotkey; the windowed exe prints no text, so check its exit code
-(0 = ok). The Windows build is new and has not yet been tested against a real radio.
+(0 = ok). The Windows build has been tested and works.
 
 ### Debian package
 
@@ -56,7 +56,7 @@ packaging/build_deb.sh                         # writes build/x6100-tci-remote_<
 sudo apt install ./build/x6100-tci-remote_*_all.deb
 ```
 
-Each [GitHub release](https://github.com/amystikis/x6100-tci-remote/releases) carries the `.deb`, the Windows `.msi` and the Windows `.zip`; they are built automatically when the version in `pyproject.toml` is bumped and pushed to `main`. If an install is refused, `sudo apt install -f` and the exact apt message tell you which library is missing. apt installs python3-venv and (as recommends) the Qt/xcb system libraries; the package's post-install step then
+Each [GitHub release](https://github.com/amystikis/x6100-tci-remote/releases) carries the `.deb`, the Windows `.msi` and the Windows `.zip`; they are built automatically when the version in `pyproject.toml` is bumped and pushed to `main`. If an install is refused, `sudo apt install -f` and the exact apt message tell you which library is missing. apt installs python3-venv and the Qt/xcb system libraries (hard dependencies, including libxcb-cursor0); the package's post-install step then
 creates `/opt/x6100-tci-remote/venv` and installs PySide6, websockets and numpy from PyPI into it (internet needed once;
 Debian/Ubuntu do not ship PySide6 under a stable package name, and their `websockets` is older than the version needed).
 If that step could not reach the internet, run the `pip install` line it prints. Removing the package deletes the venv.
@@ -83,12 +83,16 @@ automatic (the radio's bin values are not calibrated). Hide it with View > Spect
 
 - **Zoom** (1x, 2x, 4x, 8x, next to the frequency step; always starts at 1x) shows the middle part of the radio's 100 kHz span. It is a display
   zoom only (the panel protocol has no span command), so the resolution does not get finer.
-- **Colours and noise floor**: Settings > Settings... > Display picks the waterfall colour scheme and the spectrum trace
-  colour. **Auto noise floor** (on by default) shades every waterfall line relative to its own noise floor, so the noise
+- **Colours and noise floor**: Settings > Settings... > Display picks the waterfall colour scheme, the spectrum trace
+  colour (including red) and the DX call-sign colour (by mode, or one colour for all). The spectrum trace has its own
+  **auto noise floor** and a **Spectrum floor** trim slider, like the waterfall. **Auto noise floor** (on by default) shades every waterfall line relative to its own noise floor, so the noise
   goes dark and only signals show; the **Noise floor** slider trims that level, **Contrast** brightens or dims what is
   left, and **Reset** restores the defaults. With the auto switch off, the floor is fixed and the slider moves it.
-- The radio address and **Connect** live in Settings > Connection; the connection status is at the bottom of the
-  window and a **UTC clock** is at the top right.
+- The radio address, **Connect** (it becomes **Disconnect** while connected) and **Pair...** live in Settings >
+  Connection, together with the pairing state; the connection status is at the bottom of the window. A **UTC clock**
+  sits in its own box to the right of the frequency.
+- **Full screen** without window borders: the button next to Zoom, View > Full screen, or F11; Esc leaves it.
+- In AM, DSB and FM the orange passband is drawn on both sides of the frequency marker.
 
 ### Extras from the panel server
 
@@ -96,7 +100,7 @@ automatic (the radio's bin values are not calibrated). Hide it with View > Spect
 - **DX spots** (the radio's cluster feed) as call-sign labels on the spectrum: click one to tune to its exact
   frequency, hover for comment and spotter. Toggle in View > DX spots on spectrum.
 - **Radio status strip**: preamp, attenuator, NB, NR, squelch, RF gain, power, tuner, battery, FT8 app open (read-only).
-- **CW decoder** text decoded by the radio, shown when you are in CW or text arrives.
+- **CW decoder** text decoded by the radio (a 3-line field), shown when you are in CW or text arrives; **Clear** empties it.
 
 ### Radio keys (Receiver box)
 
@@ -139,10 +143,13 @@ The command talks to the running app over a per-user local socket, never over th
 
 ## Menus and settings
 
-- **View**: show or hide the spectrum & waterfall, the protocol log, the Band, Mode, Receiver and Audio boxes, the CW
-  tuner indicator and the DX spots; the choices are remembered.
-- **Settings > Settings...**: the **Connection** tab (radio address and Connect/Disconnect) and the **Display** tab
-  (waterfall colour scheme, spectrum colour, auto noise floor, noise-floor and contrast sliders).
+- **View**: show or hide the spectrum & waterfall, the protocol log, the Band, Mode, Receiver, Audio and Transmit / PTT
+  boxes, the CW tuner indicator and the DX spots, and go full screen (F11); the choices are remembered.
+- **Settings > Theme**: **Midnight** (the original blue and amber), **Dark**, **Light** and **Night red** (red tones only,
+  to keep your eyes dark-adapted). The spectrum and waterfall keep their dark scope in every theme.
+- **Settings > Settings...**: the **Connection** tab (radio address, Connect/Disconnect, pairing) and the **Display** tab
+  (waterfall colour scheme, spectrum colour, DX call-sign colour, auto noise floor and trims for the waterfall and the
+  spectrum trace, contrast slider).
 - **Help > About**: version, licence, and credits.
 
 ## Safety
@@ -167,9 +174,13 @@ ruff check .
 
 ## Credits
 
-This app only works with the **OpenX6X00** firmware for the Xiegu X6100 and X6200 (https://openx6x00.org/), which provides the TCI
-and panel servers it talks to. Thanks to **RF.Guru (Joeri Van Dooren ON6URE)** and everyone contributing to that
+This app is **not affiliated with OpenX6X00**. It works alongside the **OpenX6X00** firmware for the Xiegu X6100 and X6200
+(https://openx6x00.org/), which provides the TCI and panel servers it talks to, and works only with that firmware.
+Thanks to **all the authors and contributors of OpenX6X00**, including **RF.Guru (Joeri Van Dooren ON6URE)**, for their
 open-source firmware.
+
+Free and open for anyone to use and develop. **You are responsible for what goes on air.** Bugs and reports:
+https://github.com/amystikis/x6100-tci-remote
 
 ## License
 
