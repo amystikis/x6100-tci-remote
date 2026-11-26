@@ -161,21 +161,6 @@ The display is built to be readable on keyed CW, not just fast: the offset is av
 refreshed about three times a second, the last reading is held for 2 seconds when the signal pauses between elements
 (then it shows "no signal"), and the bars are peak-held and fall slowly. Switch it off in View > CW tuner indicator.
 
-## PTT from an OS keyboard shortcut
-
-While the app is running, this command keys or unkeys the radio, so any desktop keyboard shortcut can do it:
-
-```bash
-x6100-tci-remote --ptt toggle     # or: on | off
-```
-
-In GNOME (Settings > Keyboard > Custom Shortcuts) or KDE (Shortcuts > Custom Shortcuts) use the full path of the
-command, e.g. `/home/you/x6100-tci-remote/.venv/bin/x6100-tci-remote --ptt toggle`. Desktop shortcuts fire on key *press*
-only, so this is a toggle, not hold-to-talk (on X11, `xbindkeys` can run `--ptt on` on press and `--ptt off` on release).
-It has the same guards as the PTT button: "Enable transmit controls" must be ticked and the radio connected, and the
-auto-unkey timer still applies; a hotkey-keyed PTT does not drop when the window loses focus. `--ptt off` always works.
-The command talks to the running app over a per-user local socket, never over the network.
-
 ## Menus and settings
 
 - **View**: show or hide the spectrum & waterfall, the protocol log, the Band, Mode, Receiver, Audio and Transmit / PTT
@@ -193,6 +178,15 @@ The command talks to the running app over a per-user local socket, never over th
 - Transmit controls are off until you tick "Enable transmit controls".
 - PTT is hold-to-talk (button or the Space / chosen key), auto-unkeys after a timeout (default 120 s), and unkeys on focus
   loss, disable and close; the status bar tells you why a transmission ended. The PTT button always shows the real state.
+
+## Advanced: system-wide PTT hotkey
+
+For everyday use, the hold-to-transmit key in Settings > Keyboard (see [Transmit](#transmit)) is all you need. It only
+works while the app's window is active. If you want to key the radio from another window, the running app also accepts
+`x6100-tci-remote --ptt on|off|toggle` (e.g. from a GNOME/KDE custom shortcut, `xbindkeys` or AutoHotkey; use the full
+path of the command). Desktop shortcuts fire on key press only, so it is a toggle, not hold-to-talk. It has the same
+guards as the PTT button (transmit enabled, radio connected, auto-unkey timer), a hotkey-keyed PTT does not drop when the
+window loses focus, `--ptt off` always works, and it talks to the app over a per-user local socket, never the network.
 
 ## Development (VS Code)
 
