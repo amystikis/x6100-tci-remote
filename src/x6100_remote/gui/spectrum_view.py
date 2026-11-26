@@ -375,13 +375,13 @@ class SpectrumView(QWidget):
         self._paint_waterfall(p, w, ph + AXIS_H + PLAN_H, h - ph - AXIS_H - PLAN_H)
         self._paint_markers(p, f, w, h)
         if self._tx:
-            p.fillRect(0, 0, w, h, QColor(5, 10, 20, 150))
+            p.fillRect(0, 0, w, h, QColor(5, 10, 20, 170))
             p.setPen(QColor("#ff8a8a"))
             font = QFont(p.font())
             font.setBold(True)
-            font.setPointSize(font.pointSize() + 2)
+            font.setPixelSize(16)                  # fixed size: the app's fonts are pixel-sized (pointSize() is -1)
             p.setFont(font)
-            p.drawText(QRectF(0, 0, w, max(ph, 40)), Qt.AlignmentFlag.AlignCenter,
+            p.drawText(QRectF(12, 6, w - 24, 24), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                        "TX \u2013 the radio sends no spectrum while transmitting")
         p.end()
 

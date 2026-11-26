@@ -12,6 +12,11 @@ Themes (Settings > Theme): Midnight (above), Dark, Light and Night red. The pict
 | --- | --- |
 | ![Light theme](docs/screenshot-light.png) | ![Night red theme](docs/screenshot-night.png) |
 
+Transmitting: a **TX meter popup** with power, SWR, ALC and a transmit timer appears over the spectrum (see
+[Transmit](#transmit)).
+
+![TX meter popup](docs/screenshot-tx.png)
+
 ## Status
 
 - **Version 0.3.5.** The author has tested it against a real X6100 (OpenX6X00 firmware; the X6200 is expected to work
@@ -117,6 +122,30 @@ Until paired, the buttons only tell you so and send nothing. The app can only ev
 POWER or PTT). **Tune ATU** makes the radio transmit a carrier while it tunes, so it also needs "Enable transmit
 controls". With `--demo`, the fake radio's pairing code is `123456`.
 
+## Transmit
+
+Transmit is off until you tick **Enable transmit controls**. Test only into a dummy load.
+
+- **PTT (hold)** keys while the button (or the key below) is held. **Power** is a slider in watts, 0.1 - 10 W in steps of
+  about 0.1 W; it matches the radio's own display (the radio's TCI drive value 0 - 100 maps to 0.1 + 0.099 x drive W).
+- **Hold-to-transmit key**: Space by default. It keys the radio while the window is active, wherever the keyboard
+  focus is (a focused checkbox or button no longer swallows it); in text and number fields it types as usual.
+  Settings > Keyboard turns it off or picks another key (not Ctrl/Alt/Meta combinations, arrows, Esc, F11 or Tab).
+  The key release is debounced for 60 ms, so a key-repeat glitch does not drop the transmission. When a transmission
+  ends for another reason the status bar says why: the window lost focus, the radio ended it, or the time limit.
+- **TX meter popup**: while transmitting, a popup in the bottom right of the spectrum shows **PWR** (grey), **SWR**
+  (light green up to 2.0, amber up to 2.5, red from 2.5) and **ALC** (light blue) as bars with values, and the
+  elapsed transmit time. The values come from the `t <power W> <swr> <alc>` lines the radio sends on its panel
+  connection (about 10 per second, only while transmitting); TCI has no TX meter on this firmware. It is part of the
+  main window, not a separate window, so it can never steal the keyboard focus.
+- **The radio sends no spectrum while it transmits.** The spectrum and waterfall are dimmed and labelled, and the
+  waterfall keeps scrolling with empty rows so the time axis stays continuous.
+- **Automatic mode** (Settings > Operating, on by default): when the frequency moves into another band or segment the
+  mode follows - LSB on 160, 80, 60 and 40 m, USB from 30 m up, **DIGU** in the band plan's digital segments and **CW**
+  in its CW segments. It never changes the mode while transmitting or with the dial locked, never touches AM or FM,
+  and a mode you pick by hand stays while you tune inside the same segment. The segments come from the radio's band
+  plan, so digital and CW segments need the spectrum connection; without it the band's LSB/USB rule applies.
+
 ## CW tuner indicator
 
 Like other radios' CW tuning aids (Yaesu, Elecraft, UHSDR), the tuner measures against the **CW pitch**: a CW signal is
@@ -153,15 +182,17 @@ The command talks to the running app over a per-user local socket, never over th
   boxes, the CW tuner indicator and the DX spots, and go full screen (F11); the choices are remembered.
 - **Settings > Theme**: **Midnight** (the original blue and amber), **Dark**, **Light** and **Night red** (red tones only,
   to keep your eyes dark-adapted). The spectrum and waterfall keep their dark scope in every theme.
-- **Settings > Settings...**: the **Connection** tab (radio address, Connect/Disconnect, pairing) and the **Display** tab
+- **Settings > Settings...**: the **Connection** tab (radio address, Connect/Disconnect, pairing), the **Display** tab
   (waterfall colour scheme, spectrum colour, DX call-sign colour, auto noise floor and trims for the waterfall and the
-  spectrum trace, contrast slider).
+  spectrum trace, contrast slider), the **Operating** tab (automatic mode by band and segment) and the **Keyboard** tab
+  (hold-to-transmit key on/off and which key).
 - **Help > About**: version, licence, and credits.
 
 ## Safety
 
 - Transmit controls are off until you tick "Enable transmit controls".
-- PTT is hold-to-talk, auto-unkeys after a timeout (default 120 s), and unkeys on focus loss, disable and close.
+- PTT is hold-to-talk (button or the Space / chosen key), auto-unkeys after a timeout (default 120 s), and unkeys on focus
+  loss, disable and close; the status bar tells you why a transmission ended. The PTT button always shows the real state.
 
 ## Development (VS Code)
 

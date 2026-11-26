@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The "TX - the radio sends no spectrum while transmitting" label on the dimmed spectrum was drawn in a 1-point font and could not be read; it now has a fixed size and sits at the top left, clear of the TX meter popup.
+- README: new Transmit section and a screenshot of the TX meter popup.
+
 ## 0.3.5
 
 - Transmit meter popup: while transmitting, power, SWR and ALC are shown in a popup over the bottom right of the spectrum, with a running transmit timer. The values come from the radio's `t` lines on the panel connection. SWR is light green up to 2.0, amber up to 2.5 and red above.
