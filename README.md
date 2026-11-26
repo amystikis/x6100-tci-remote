@@ -146,6 +146,27 @@ Transmit is off until you tick **Enable transmit controls**. Test only into a du
   and a mode you pick by hand stays while you tune inside the same segment. The segments come from the radio's band
   plan, so digital and CW segments need the spectrum connection; without it the band's LSB/USB rule applies.
 
+## Recorder and playback-transmit
+
+The **Recorder / playback** box (View > Recorder / playback) sits under Audio.
+
+- **Rec** records the radio's receive audio to a WAV file (48 kHz, 16 bit, stereo) until you press it again. It works
+  with Sound off (it switches the radio's audio stream on by itself and off again afterwards). The file name carries
+  the UTC time, frequency and mode, e.g. `x6100_20261126_114530Z_7151.000kHz_LSB.wav`, so recordings can be matched to
+  the band later. **Folder** opens the folder; the default is `~/Documents/x6100-recordings` and it can be changed in
+  Settings > Operating. A recording stops by itself after an hour, on disconnect, or on a disk error. Use the files
+  with any analysis or decoding tool (Audacity, fldigi, WSJT-X file decode, ...).
+- **File... / Transmit file** picks a WAV file (PCM 8/16/24/32 bit or float; mono or stereo; any sample rate, it is
+  converted to 48 kHz mono-to-stereo) and transmits it on the radio's current frequency, mode and power. Use it for
+  voice messages, CQ calls or test signals. It goes on air, so:
+  - it needs **Enable transmit controls** ticked and a connection, asks for a **confirmation** each time (file,
+    duration, frequency, mode, power), and refuses a file longer than the **Auto-unkey** time;
+  - **Stop** (or releasing a PTT key, or any other unkey such as focus loss) ends it at once; it unkeys by itself a
+    moment after the file ends;
+  - the **Level** slider sets the audio level sent to the radio and can be moved while playing; watch ALC in the TX
+    meter and lower it if ALC is high. Like the computer-microphone option, this sends audio over TCI, which is still
+    experimental: test into a dummy load first.
+
 ## CW tuner indicator
 
 Like other radios' CW tuning aids (Yaesu, Elecraft, UHSDR), the tuner measures against the **CW pitch**: a CW signal is
@@ -163,13 +184,13 @@ refreshed about three times a second, the last reading is held for 2 seconds whe
 
 ## Menus and settings
 
-- **View**: show or hide the spectrum & waterfall, the protocol log, the Band, Mode, Receiver, Audio and Transmit / PTT
+- **View**: show or hide the spectrum & waterfall, the protocol log, the Band, Mode, Receiver, Audio, Recorder / playback and Transmit / PTT
   boxes, the CW tuner indicator and the DX spots, and go full screen (F11); the choices are remembered.
 - **Settings > Theme**: **Midnight** (the original blue and amber), **Dark**, **Light** and **Night red** (red tones only,
   to keep your eyes dark-adapted). The spectrum and waterfall keep their dark scope in every theme.
 - **Settings > Settings...**: the **Connection** tab (radio address, Connect/Disconnect, pairing), the **Display** tab
   (waterfall colour scheme, spectrum colour, DX call-sign colour, auto noise floor and trims for the waterfall and the
-  spectrum trace, contrast slider), the **Operating** tab (automatic mode by band and segment) and the **Keyboard** tab
+  spectrum trace, contrast slider), the **Operating** tab (automatic mode by band and segment, recordings folder) and the **Keyboard** tab
   (hold-to-transmit key on/off and which key).
 - **Help > About**: version, licence, and credits.
 

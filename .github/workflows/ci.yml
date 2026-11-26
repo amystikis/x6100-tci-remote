@@ -18,7 +18,7 @@ jobs:
         with: { python-version: "${{ matrix.python }}" }
       - run: pip install -e ".[dev]"
       - run: ruff check .
-      - run: pytest -q tests/test_protocol.py tests/test_client_fake.py
+      - run: pytest -q tests/test_protocol.py tests/test_client_fake.py tests/test_audiofile.py
 
   gui:
     name: GUI tests (offscreen)

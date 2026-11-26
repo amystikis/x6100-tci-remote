@@ -34,6 +34,7 @@ class FakeRadio:
         self.trx = False
         self.clients: set = set()
         self.tx_audio_frames = 0
+        self.tx_audio_peak = 0.0                # largest TX sample received (to check what was sent)
         self.keyed_with_tci = False
         self.log: list[str] = []          # every text command received (for tests)
 
@@ -148,6 +149,9 @@ class FakeRadio:
                     hdr, _ = decode_stream(msg)
                     if hdr.type == STREAM_TX_AUDIO:
                         self.tx_audio_frames += 1
+                        _, samples = decode_stream(msg)
+                        if samples.size:
+                            self.tx_audio_peak = max(self.tx_audio_peak, float(np.abs(samples).max()))
         except Exception:
             pass
         finally:

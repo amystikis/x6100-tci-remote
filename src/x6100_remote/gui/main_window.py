@@ -5,15 +5,18 @@ import platform
 import re
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
-from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QFont, QKeyEvent, QKeySequence
+from PySide6.QtCore import QEvent, Qt, QTimer, QUrl
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QFont, QKeyEvent, QKeySequence
 from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog, QDockWidget,
-                               QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel,
-                               QKeySequenceEdit, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
-                               QSlider, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
+                               QFileDialog, QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QInputDialog,
+                               QKeySequenceEdit, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit,
+                               QPushButton, QSlider, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
 
 from .. import __version__
+from ..audiofile import (MAX_REC_S, FilePlayer, WavRecorder, default_rec_dir, read_audio, recording_name,
+                         unique_path)
 from ..automode import desired_mode, needs_change
 from ..cwtuner import target_hz
 from ..ipc import CommandServer
@@ -100,6 +103,13 @@ class MainWindow(QMainWindow):
         self.status.setTextFormat(Qt.TextFormat.RichText)
         self.statusBar().addPermanentWidget(self.status)
         self._space_ptt = False              # the PTT key is held and keying
+        self._recording = False                  # REC is on (the file opens with the first audio block)
+        self._rec: WavRecorder | None = None
+        self._rec_started_audio = False          # REC switched the radio's audio stream on (Sound was off)
+        self._rec_shown = -1
+        self._play_samples: tuple | None = None  # (samples, rate) of the file chosen for playback-transmit
+        self._play_path: Path | None = None
+        self._player: FilePlayer | None = None
         self._auto_mode_on = load_flag("auto_mode", True)
         self._auto_key: tuple | None = None      # (band, wanted mode) of the last place we looked at
         self._release_timer = QTimer(self)
@@ -292,6 +302,52 @@ class MainWindow(QMainWindow):
         al.addWidget(self.mute)
         v.addWidget(au)
 
+        # recorder / playback-transmit ------------------------------------------------
+        rb = self.rec_box = QGroupBox("Recorder / playback")
+        rv = QVBoxLayout(rb)
+        rv.setContentsMargins(8, 2, 8, 4)
+        r1 = QHBoxLayout()
+        self.rec_btn = _btn("\u25cf Rec", True, self.toggle_record)
+        self.rec_btn.setStyleSheet("QPushButton:checked { background:#b32323; border-color:#ff5a5a; color:white; }")
+        self.rec_btn.setToolTip("Record the radio's receive audio to a WAV file (48 kHz, 16 bit, stereo). The file "
+                                "name has the UTC time, frequency and mode.")
+        self.rec_time = QLabel("00:00")
+        self.rec_time.setMinimumWidth(48)
+        self.rec_info = QLabel("")
+        self.rec_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        r1.addWidget(self.rec_btn)
+        r1.addWidget(self.rec_time)
+        r1.addWidget(self.rec_info, 1)
+        r1.addWidget(_btn("Folder", slot=self.open_rec_folder))
+        rv.addLayout(r1)
+        r2 = QHBoxLayout()
+        self.play_choose = _btn("File...", slot=self.choose_play_file)
+        self.play_name = QLabel("No file selected")
+        self.play_level = QSlider(Qt.Orientation.Horizontal)
+        self.play_level.setRange(5, 100)
+        self.play_level.setValue(60)
+        self.play_level.setMaximumWidth(120)
+        self.play_level.setToolTip("Audio level sent to the radio (watch ALC in the TX meter; it can be changed while "
+                                   "the file plays)")
+        self.play_level_lbl = QLabel("60%")
+        self.play_level.valueChanged.connect(self._play_level_changed)
+        self.play_btn = _btn("\u25b6 Transmit file", slot=lambda: self.play_file())
+        self.play_btn.setToolTip("Transmit the chosen WAV file. Needs 'Enable transmit controls'. Uses the radio's "
+                                 "current frequency, mode and power.")
+        self.play_stop = _btn("\u25a0 Stop", slot=self.stop_playback)
+        r2.addWidget(self.play_choose)
+        r2.addWidget(self.play_name, 1)
+        r2.addWidget(QLabel("Level"))
+        r2.addWidget(self.play_level)
+        r2.addWidget(self.play_level_lbl)
+        r2.addWidget(self.play_btn)
+        r2.addWidget(self.play_stop)
+        rv.addLayout(r2)
+        self._play_timer = QTimer(self)
+        self._play_timer.setInterval(100)
+        self._play_timer.timeout.connect(self._play_tick)
+        v.addWidget(rb)
+
         # transmit (guarded) ---------------------------------------------------------
         self.tx_box = QFrame()
         self.tx_box.setObjectName("tx_group")
@@ -365,6 +421,7 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         for key, label, box in (("band", "Band", self.band_box), ("mode", "Mode", self.modes_box),
                                 ("receiver", "Receiver", self.rx_box), ("audio", "Audio", self.audio_box),
+                                ("recorder", "Recorder / playback", self.rec_box),
                                 ("transmit", "Transmit / PTT", self.tx_box)):
             act = QAction(label, self)
             act.setCheckable(True)
@@ -420,6 +477,7 @@ class MainWindow(QMainWindow):
         self.w.status.connect(self.on_status)
         self.w.changed.connect(self.refresh)
         self.w.audio.connect(self.rx.push)
+        self.w.audio.connect(self._on_rx_audio)
         self.w.spectrum.connect(self.spectrum.push)
         self.w.panel_status.connect(self.on_panel_status)
         self.w.panel_info.connect(self.on_panel_info)
@@ -820,7 +878,19 @@ class MainWindow(QMainWindow):
                            "Not while transmitting or with the dial locked. AM/FM are never changed, and a mode you\n"
                            "pick by hand stays while you tune inside the same segment."))
         self.auto_mode_check = on
+        row = QHBoxLayout()
+        self.rec_dir_lbl = QLabel(str(self.rec_dir()))
+        self.rec_dir_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        row.addWidget(self.rec_dir_lbl, 1)
+        row.addWidget(_btn("Choose...", slot=self._choose_rec_dir))
+        form.addRow("Recordings folder", row)
         return page
+
+    def _choose_rec_dir(self) -> None:
+        d = QFileDialog.getExistingDirectory(self, "Recordings folder", str(self.rec_dir()))
+        if d:
+            save_choice("rec_dir", d)
+            self.rec_dir_lbl.setText(d)
 
     def _build_keyboard_tab(self) -> QWidget:
         page = QWidget()
@@ -928,10 +998,184 @@ class MainWindow(QMainWindow):
                 self.sound.setChecked(False)
                 self.statusBar().showMessage("No audio output available", 5000)
                 return
+            self._rec_started_audio = False         # the user wants the stream now; REC no longer owns it
             self.w.set_audio(True)
         else:
-            self.w.set_audio(False)
             self.rx.stop()
+            if self._recording:                     # keep the stream on for the recording; REC turns it off later
+                self._rec_started_audio = True
+                return
+            self.w.set_audio(False)
+
+    # recorder ---------------------------------------------------------------------------
+    def rec_dir(self) -> Path:
+        return Path(load_choice("rec_dir", str(default_rec_dir())))
+
+    def open_rec_folder(self) -> None:
+        d = self.rec_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(d)))
+
+    def toggle_record(self, on: bool) -> None:
+        if on:
+            if not self.w.client:
+                self.rec_btn.blockSignals(True)
+                self.rec_btn.setChecked(False)
+                self.rec_btn.blockSignals(False)
+                self.statusBar().showMessage("Connect to the radio first", 5000)
+                return
+            self._recording = True
+            self._rec_shown = -1
+            self.rec_time.setText("00:00")
+            self.rec_info.setText("recording...")
+            if not self.sound.isChecked():           # recording does not need the speaker, only the audio stream
+                self._rec_started_audio = True
+                self.w.set_audio(True)
+        else:
+            self._stop_record()
+
+    def _on_rx_audio(self, data: bytes, rate: int) -> None:
+        if not self._recording:
+            return
+        try:
+            if self._rec is None:
+                path = unique_path(self.rec_dir(), recording_name(self.state.freq, self.state.mode))
+                self._rec = WavRecorder(path, rate)
+                self.rec_info.setText(path.name)
+            elif rate != self._rec.rate:
+                self._stop_record("Recording stopped: the radio changed its audio sample rate")
+                return
+            self._rec.write(data)
+        except OSError as e:
+            self._stop_record("Recording stopped: %s" % e)
+            return
+        sec = int(self._rec.seconds)
+        if sec != self._rec_shown:
+            self._rec_shown = sec
+            self.rec_time.setText("%02d:%02d" % (sec // 60, sec % 60))
+        if self._rec.seconds >= MAX_REC_S:
+            self._stop_record("Recording stopped after %d minutes" % (MAX_REC_S // 60))
+
+    def _stop_record(self, message: str = "") -> None:
+        rec, self._rec = self._rec, None
+        self._recording = False
+        self.rec_btn.blockSignals(True)
+        self.rec_btn.setChecked(False)
+        self.rec_btn.blockSignals(False)
+        if rec is not None:
+            rec.close()
+            size = rec.path.stat().st_size / 1e6 if rec.path.exists() else 0.0
+            self.rec_info.setText(rec.path.name)
+            self.statusBar().showMessage(message or "Saved %s (%.0f s, %.1f MB)" % (rec.path, rec.seconds, size), 10000)
+        else:
+            self.rec_info.setText("")
+            if message:
+                self.statusBar().showMessage(message, 8000)
+        if self._rec_started_audio:
+            self._rec_started_audio = False
+            if not self.sound.isChecked():
+                self.w.set_audio(False)
+
+    # playback-transmit --------------------------------------------------------------------
+    def choose_play_file(self) -> None:
+        start = load_choice("play_dir", str(self.rec_dir()))
+        path, _ = QFileDialog.getOpenFileName(self, "Audio file to transmit", start, "WAV audio (*.wav);;All files (*)")
+        if path:
+            self.load_play_file(path)
+
+    def load_play_file(self, path: str) -> bool:
+        try:
+            samples, rate = read_audio(path)
+        except (ValueError, OSError) as e:
+            QMessageBox.warning(self, "Audio file", "Cannot use %s:\n%s" % (path, e))
+            return False
+        self._play_samples, self._play_path = (samples, rate), Path(path)
+        save_choice("play_dir", str(Path(path).parent))
+        self._show_play_name()
+        self._update_play_buttons()
+        return True
+
+    def _show_play_name(self, extra: str = "") -> None:
+        if self._play_samples is None or self._play_path is None:
+            self.play_name.setText("No file selected")
+            return
+        secs = len(self._play_samples[0]) / self._play_samples[1]
+        self.play_name.setText(extra or "%s  (%d:%02d)" % (self._play_path.name, secs // 60, secs % 60))
+        self.play_name.setToolTip(str(self._play_path))
+
+    def _play_level_changed(self, value: int) -> None:
+        self.play_level_lbl.setText("%d%%" % value)
+        if self._player is not None:
+            self._player.gain = value / 100
+
+    def _update_play_buttons(self) -> None:
+        busy = self._player is not None
+        ready = (self._play_samples is not None and self.tx_enable.isChecked() and bool(self.w.client)
+                 and not self._ptt_on)
+        self.play_btn.setEnabled(ready)
+        self.play_stop.setEnabled(busy)
+        self.play_choose.setEnabled(not busy)
+
+    def play_file(self, confirm: bool = True) -> None:
+        """Transmit the chosen file. Same guards as the PTT button, plus a confirmation, because it goes on air."""
+        if self._ptt_on or self._player is not None:
+            return
+        if not self.tx_enable.isChecked() or not self.w.client:
+            self.statusBar().showMessage("Tick 'Enable transmit controls' and connect first", 5000)
+            return
+        if self._play_samples is None:
+            self.statusBar().showMessage("Choose an audio file first", 5000)
+            return
+        samples, rate = self._play_samples
+        player = FilePlayer(samples, rate, self.play_level.value() / 100, self.state.audio_sample_rate or 48000)
+        if player.seconds > self.tx_limit.value():
+            QMessageBox.warning(self, "Transmit file",
+                                "The file is %.0f s long but 'Auto-unkey after' is %d s.\nRaise that limit or choose a "
+                                "shorter file." % (player.seconds, self.tx_limit.value()))
+            return
+        if confirm:
+            st = self.state
+            ask = QMessageBox.question(
+                self, "Transmit file",
+                "Transmit %s (%.0f s)\non %.3f kHz %s at %s?\n\nYou are responsible for what goes on air." % (
+                    self._play_path.name if self._play_path else "the file", player.seconds, st.freq / 1000,
+                    MODE_LABELS.get(st.mode, st.mode), self._power_text(self.drive.value())),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+            if ask != QMessageBox.StandardButton.Yes:
+                return
+        self._player = player
+        self.set_ptt(True, source=player.read_frames)
+        if not self._ptt_on:                          # refused
+            self._player = None
+            self._update_play_buttons()
+            return
+        self._play_timer.start()
+        self._update_play_buttons()
+
+    def stop_playback(self) -> None:
+        if self._player is not None:
+            self.set_ptt(False)
+            self.statusBar().showMessage("Playback stopped", 5000)
+
+    def _end_playback(self) -> None:
+        self._play_timer.stop()
+        self._player = None
+        self._show_play_name()
+        self._update_play_buttons()
+
+    def _play_tick(self) -> None:
+        p = self._player
+        if p is None:
+            self._play_timer.stop()
+            return
+        if not self.w.client or not self._ptt_on:
+            self.set_ptt(False)
+            return
+        if p.done:
+            self.set_ptt(False)
+            self.statusBar().showMessage("Playback finished", 5000)
+            return
+        self._show_play_name("Transmitting  %.1f / %.1f s" % (p.position_s, p.seconds))
 
     # transmit ---------------------------------------------------------------------------
     def tx_enable_changed(self, on: bool) -> None:
@@ -941,22 +1185,26 @@ class MainWindow(QMainWindow):
         if not on and self._ptt_on:
             self.set_ptt(False)
         self._update_key_buttons()
+        self._update_play_buttons()
 
-    def set_ptt(self, on: bool, external: bool = False) -> None:
+    def set_ptt(self, on: bool, external: bool = False, source=None) -> None:
+        """Key or unkey. ``source`` (a ``read_frames(n)`` callable) sends that audio instead of the microphone."""
         if on and (not self.tx_enable.isChecked() or not self.w.client):
             return
         if on == self._ptt_on:
             return
         self._ptt_on = on
         self._ptt_external = on and external
-        use_pc_mic = self.pc_mic.isChecked() and on
-        if on and use_pc_mic:
+        use_pc_mic = self.pc_mic.isChecked() and on and source is None
+        if on and source is not None:
+            self.w.set_tx_source(source)
+        elif on and use_pc_mic:
             if not self.mic.start():
                 self.statusBar().showMessage("Microphone unavailable", 5000)
                 self._ptt_on = False
                 return
             self.w.set_tx_source(self.mic.read_frames)
-        self.w.set_ptt(on, use_pc_mic)
+        self.w.set_ptt(on, use_pc_mic or source is not None)
         if on:
             self._tx_since = time.monotonic()
             self.tx_timer.start()
@@ -964,8 +1212,11 @@ class MainWindow(QMainWindow):
             self.tx_timer.stop()
             self.mic.stop()
             self.w.set_tx_source(None)
+            if self._player is not None:
+                self._end_playback()
         self.ptt.setDown(on)                       # show the state also when keyed/unkeyed by key, timer or focus loss
         self._update_key_buttons()
+        self._update_play_buttons()
 
     def _tx_watchdog(self) -> None:
         if self._ptt_on and time.monotonic() - self._tx_since > self.tx_limit.value():
@@ -1038,6 +1289,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e) -> None:
         self.set_ptt(False)
+        if self._recording:
+            self._stop_record()
         app = QApplication.instance()
         if app is not None:
             app.removeEventFilter(self)
@@ -1268,6 +1521,10 @@ class MainWindow(QMainWindow):
         text = {"connected": "Connected", "connecting": "Connecting to " + detail,
                 "disconnected": ("Disconnected " + detail).strip()}[state]
         self.status.setText("<span style='color:%s'>●</span> %s" % (colors[state], text))
+        if state == "disconnected" and self._recording:
+            self._stop_record("Recording stopped: disconnected from the radio")
+        if state == "disconnected":
+            self._update_play_buttons()
         if state == "disconnected" and not detail:
             self.connect_btn.setText("Connect")
         else:

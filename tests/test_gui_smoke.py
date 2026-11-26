@@ -600,3 +600,92 @@ def test_mode_follows_band_and_segment(env):
     win.band_mem["40"] = [7_100_000, "lsb"]
     win.pick_band("40")
     pump(lambda: win.state.freq == 7_100_000 and win.state.mode == "lsb")   # remembered mode is used, auto mode off
+
+
+def test_recorder_writes_the_radios_audio_to_a_wav_file(env, tmp_path):
+    import wave
+    from x6100_remote.gui.settings import save_choice
+    win, radio, pump = env
+    save_choice("rec_dir", str(tmp_path))
+    assert not win.sound.isChecked()
+    win.rec_btn.setChecked(True)                                   # Sound is off: REC starts the audio stream itself
+    pump(lambda: win._rec is not None and win._rec.frames > 48000 * 0.3)
+    assert win._rec_started_audio and win.rec_time.text() == "00:00"
+    name = win._rec.path.name
+    assert name.startswith("x6100_") and "kHz_LSB" in name and name.endswith(".wav")
+    win.rec_btn.setChecked(False)
+    assert win._rec is None and not win._recording
+    files = list(tmp_path.glob("*.wav"))
+    assert len(files) == 1
+    with wave.open(str(files[0])) as w:
+        assert (w.getnchannels(), w.getsampwidth(), w.getframerate()) == (2, 2, 48000) and w.getnframes() > 10000
+    pump(lambda: not win._rec_started_audio)                       # and the stream it started is switched off again
+    assert "Saved" in win.statusBar().currentMessage()
+
+
+def test_recording_needs_a_connection(env):
+    from unittest.mock import patch
+    win, radio, pump = env
+    with patch.object(win.w, "client", None):                      # restored before the fixture shuts the window down
+        win.rec_btn.setChecked(True)
+        assert not win.rec_btn.isChecked() and not win._recording
+    pump(lambda: win.w.client is not None)
+
+
+def _tone_wav(path, secs=0.4):
+    import wave
+    import numpy as np
+    t = np.arange(int(48000 * secs)) / 48000
+    pcm = (0.5 * np.sin(2 * np.pi * 1000 * t) * 32767).astype("<i2")
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(48000)
+        w.writeframes(pcm.tobytes())
+
+
+def test_playback_transmit_sends_the_file_and_unkeys_itself(env, tmp_path):
+    win, radio, pump = env
+    f = tmp_path / "msg.wav"
+    _tone_wav(f)
+    assert win.load_play_file(str(f)) and "msg.wav" in win.play_name.text()
+    assert not win.play_btn.isEnabled()                            # transmit controls are not enabled yet
+    win.play_file(confirm=False)
+    assert not win._ptt_on and radio.tx_audio_frames == 0          # refused: nothing on air
+    win.tx_enable.setChecked(True)
+    assert win.play_btn.isEnabled()
+    win.play_level.setValue(50)
+    win.play_file(confirm=False)
+    assert win._ptt_on and win._player is not None and win.play_stop.isEnabled() and not win.play_choose.isEnabled()
+    pump(lambda: radio.trx and radio.tx_audio_frames > 5)
+    pump(lambda: not win._ptt_on, timeout=6)                       # file + tail played, then it unkeys by itself
+    assert win._player is None and not radio.trx
+    assert 0.2 < radio.tx_audio_peak <= 0.26                       # 0.5 amplitude x 50 % level
+    assert "finished" in win.statusBar().currentMessage()
+
+
+def test_playback_stop_button_and_limits(env, tmp_path, monkeypatch):
+    win, radio, pump = env
+    f = tmp_path / "long.wav"
+    _tone_wav(f, secs=3.0)
+    win.load_play_file(str(f))
+    win.tx_enable.setChecked(True)
+    win.play_file(confirm=False)
+    pump(lambda: radio.trx and radio.tx_audio_frames > 3)
+    win.stop_playback()
+    pump(lambda: not radio.trx)
+    assert win._player is None and not win._ptt_on and win.play_btn.isEnabled()
+    win.tx_limit.setValue(5)
+    short = tmp_path / "short.wav"
+    _tone_wav(short, secs=0.2)
+    assert win.load_play_file(str(short))
+    win.tx_limit.setMinimum(1)
+    win.tx_limit.setValue(1)
+    long2 = tmp_path / "long2.wav"
+    _tone_wav(long2, secs=1.5)
+    win.load_play_file(str(long2))
+    from PySide6.QtWidgets import QMessageBox
+    shown = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: shown.append(a[2])))   # modal: would block
+    win.play_file(confirm=False)
+    assert shown and "limit" in shown[0] and not win._ptt_on                    # longer than the auto-unkey limit
