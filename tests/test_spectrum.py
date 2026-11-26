@@ -334,3 +334,11 @@ def test_spectrum_colours_include_red():
     pytest.importorskip("PySide6")
     from x6100_remote.gui.spectrum_view import SPECTRUM_SCHEMES
     assert SPECTRUM_SCHEMES["Red"] == "#ff5a5a"
+
+
+def test_panelinfo_parses_tx_meter_line():
+    from x6100_remote.panelinfo import PanelInfo
+    i = PanelInfo()
+    assert i.apply("t 2.4 1.02 7.7") == "t"
+    assert (i.tx_power, i.tx_swr, i.tx_alc) == (2.4, 1.02, 7.7)
+    assert i.apply("t junk") is None and i.tx_power == 2.4

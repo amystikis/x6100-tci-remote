@@ -206,6 +206,8 @@ class FakePanel:
     async def spectrum_loop(self, ws) -> None:
         while True:
             await asyncio.sleep(1 / self.FPS)
+            if self.radio.trx:                  # the real radio sends no spectrum frames while it transmits
+                continue
             self.seq += 1
             await ws.send(pack_frame(self.radio.vfo[0], self.SPAN, self.seq, self.spectrum_bins(self.radio.vfo[0])))
 
@@ -230,6 +232,18 @@ class FakePanel:
             n += 1
             await ws.send("spots " + json.dumps(self.SPOTS, separators=(",", ":")))
             await ws.send("cw " + json.dumps("K1TTT %d " % n))
+
+    async def meter_loop(self, ws) -> None:
+        """``t <power W> <swr> <alc>`` about 10 times a second, like the real radio (it sends them also on receive)."""
+        k = 0
+        while True:
+            await asyncio.sleep(0.1)
+            k += 1
+            if self.radio.trx:
+                p = (0.1 + 0.099 * self.radio.drive) * (0.6 + 0.4 * abs(math.sin(k / 4)))
+                await ws.send("t %.1f 1.%02d %.1f" % (p, 5 + k % 3, 4 + 3 * abs(math.sin(k / 3))))
+            else:
+                await ws.send("t 0.0 1.00 0.0")
 
     async def handle_control(self, ws, msg: str, sess: dict) -> None:
         """Auth, pairing, control and key presses, like the real radio's panel server (format inferred)."""
@@ -279,6 +293,7 @@ class FakePanel:
             for line in ("hello OpenX6X00 - fake", "size 800 480", "role view 0 -", "ctl none 0", *self.info_lines()):
                 await ws.send(line)
             loops["info"] = asyncio.ensure_future(self.info_loop(ws))
+            loops["meter"] = asyncio.ensure_future(self.meter_loop(ws))
             async for msg in ws:
                 if not isinstance(msg, str):
                     continue

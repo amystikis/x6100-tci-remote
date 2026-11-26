@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
@@ -130,6 +130,10 @@ class SpectrumView(QWidget):
         self._cw_hold_t = 0.0
         self._cw_target = 0.0
         self._spot_boxes: list[tuple[QRectF, Spot]] = []
+        self._tx = False                              # transmitting: the radio sends no spectrum, we dim and scroll
+        self._tx_timer = QTimer(self)
+        self._tx_timer.setInterval(70)                # about the radio's own frame rate
+        self._tx_timer.timeout.connect(self._tx_row)
 
     # data --------------------------------------------------------------------------------------
     def set_message(self, text: str) -> None:
@@ -226,6 +230,28 @@ class SpectrumView(QWidget):
             if box.adjusted(-2, -1, 2, 1).contains(x, y):
                 return spot
         return None
+
+    def set_transmitting(self, on: bool) -> None:
+        """The radio sends no spectrum while it transmits: dim the display, label it and keep the waterfall
+        scrolling with empty rows so the time axis stays continuous."""
+        if on == self._tx:
+            return
+        self._tx = on
+        if on:
+            self._tx_timer.start()
+        else:
+            self._tx_timer.stop()
+        self.update()
+
+    def _tx_row(self) -> None:
+        if self._wf is None or self._wl is None or self._wmed is None:
+            return
+        self._wf[1:] = self._wf[:-1].copy()
+        self._wl[1:] = self._wl[:-1].copy()
+        self._wmed[1:] = self._wmed[:-1].copy()
+        self._wf[0] = self._bg
+        self._wl[0] = 0
+        self.update()
 
     def clear(self) -> None:
         self._frame = self._wf = self._wl = self._wmed = self._level = None
@@ -348,6 +374,15 @@ class SpectrumView(QWidget):
         self._paint_cw_tuner(p, f, w, ph)
         self._paint_waterfall(p, w, ph + AXIS_H + PLAN_H, h - ph - AXIS_H - PLAN_H)
         self._paint_markers(p, f, w, h)
+        if self._tx:
+            p.fillRect(0, 0, w, h, QColor(5, 10, 20, 150))
+            p.setPen(QColor("#ff8a8a"))
+            font = QFont(p.font())
+            font.setBold(True)
+            font.setPointSize(font.pointSize() + 2)
+            p.setFont(font)
+            p.drawText(QRectF(0, 0, w, max(ph, 40)), Qt.AlignmentFlag.AlignCenter,
+                       "TX \u2013 the radio sends no spectrum while transmitting")
         p.end()
 
     def _paint_trace(self, p: QPainter, f: SpectrumFrame, w: int, ph: int) -> None:

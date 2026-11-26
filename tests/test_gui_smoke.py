@@ -271,7 +271,7 @@ def test_drive_slider_sends_on_wheel_keys_click_and_drag(env):
     pump(lambda: radio.drive == 60)                                          # the last value always arrives
     sent = [m for m in radio.log if m.startswith("drive")]
     assert len(sent) < 14                                                    # throttled, not one message per step
-    pump(lambda: win.drive.value() == 60 and win.drive_lbl.text() == "60")   # the radio's echo does not undo it
+    pump(lambda: win.drive.value() == 60 and win.drive_lbl.text() == "6.0 W")   # the radio's echo does not undo it
     win.drive.setValue(61)
     win.drive.sliderReleased.emit()                                          # release sends at once
     pump(lambda: radio.drive == 61)
@@ -449,3 +449,154 @@ def test_spot_colour_choice(env):
     assert win.spectrum._spot_color == "#ff5a5a"
     win._spot_scheme_chosen("By mode")
     assert win.spectrum._spot_color is None
+
+
+def test_tx_meter_popup_shows_only_while_transmitting(env):
+    win, radio, pump = env
+    assert not win.tx_meter.isVisible()
+    win.tx_enable.setChecked(True)
+    win.set_ptt(True)
+    pump(lambda: win.tx_meter.isVisible())
+    win.w.info.apply("t 3.0 2.40 5.0")
+    win._tx_meter_update()
+    assert win.tx_meter._vals["PWR"].text() == "3.0 W" and win.tx_meter._vals["SWR"].text() == "2.40"
+    win.set_ptt(False)
+    pump(lambda: not win.tx_meter.isVisible())
+
+
+def test_waterfall_keeps_scrolling_and_dims_while_transmitting(env):
+    win, radio, pump = env
+    sp = win.spectrum
+    import numpy as np
+    from x6100_remote.spectrum import SpectrumFrame
+    bins = np.full(1024, 140, dtype=np.uint8)
+    bins[500:520] = 230                                    # a strong signal, so the pushed row is not blank
+    sp.push(SpectrumFrame(7_151_000, 100_000, 1, bins))
+    assert not (sp._wf[0] == sp._bg).all()
+    win.tx_enable.setChecked(True)
+    win.set_ptt(True)
+    pump(lambda: sp._tx)
+    pump(lambda: (sp._wf[0] == sp._bg).all())              # the timer scrolls in empty rows
+    win.set_ptt(False)
+    pump(lambda: not sp._tx)
+
+
+def test_tx_meter_shows_elapsed_time_and_power_label_is_watts(env):
+    win, radio, pump = env
+    assert win.drive.minimum() == 0 and win.drive.maximum() == 100
+    for drive, watts in ((0, "0.1 W"), (1, "0.2 W"), (10, "1.1 W"), (100, "10.0 W")):    # as the radio shows them
+        win.drive.setValue(drive)
+        assert win.drive_lbl.text() == watts
+    win.tx_enable.setChecked(True)
+    win.set_ptt(True)
+    pump(lambda: win.tx_meter.isVisible())
+    t = time.time()
+    pump(lambda: win.tx_meter._clock.text() != "00:00.0", 2)
+    win.set_ptt(False)
+    pump(lambda: not win.tx_meter.isVisible())
+    assert not win.tx_meter._tick.isActive() and time.time() - t < 2
+
+
+def test_space_holds_ptt_wherever_the_focus_is(env):
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtWidgets import QApplication as App
+    win, radio, pump = env
+    win.activateWindow()
+    pump(lambda: App.activeWindow() is win)
+    win.tx_enable.setChecked(False)
+    win.tx_enable.setFocus()
+
+    def key(kind, auto=False):
+        ev = QKeyEvent(kind, Qt.Key.Key_Space, Qt.KeyboardModifier.NoModifier, " ", auto)
+        return win.eventFilter(win.tx_enable, ev)
+
+    assert key(QEvent.Type.KeyPress) and not win._ptt_on and not win.tx_enable.isChecked()   # refused, not toggled
+    win.tx_enable.setChecked(True)
+    assert key(QEvent.Type.KeyPress) and win._ptt_on and win.ptt.isDown()                    # button shows keyed
+    assert key(QEvent.Type.KeyPress, auto=True) and win._ptt_on                              # auto-repeat does nothing
+    assert key(QEvent.Type.KeyRelease) and win._ptt_on                       # release is debounced
+    assert key(QEvent.Type.KeyPress) and win._ptt_on                         # key repeat: release+press
+    assert key(QEvent.Type.KeyRelease)
+    pump(lambda: not win._ptt_on and not win.ptt.isDown())                    # a real release unkeys
+
+
+def test_ptt_key_can_be_changed_and_disabled(env):
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent, QKeySequence
+    from PySide6.QtWidgets import QApplication as App
+    win, radio, pump = env
+    win.activateWindow()
+    pump(lambda: App.activeWindow() is win)
+    win.tx_enable.setChecked(True)
+
+    def key(k, kind):
+        return win.eventFilter(win, QKeyEvent(kind, k, Qt.KeyboardModifier.NoModifier, "x", False))
+
+    win.ptt_key_edit.setKeySequence(QKeySequence(Qt.Key.Key_F9))
+    assert win._ptt_key == Qt.Key.Key_F9.value
+    assert not key(Qt.Key.Key_Space, QEvent.Type.KeyPress) and not win._ptt_on          # old key does nothing now
+    assert key(Qt.Key.Key_F9, QEvent.Type.KeyPress) and win._ptt_on
+    win.ptt_key_check.setChecked(False)                                                 # disabling unkeys at once
+    assert not win._ptt_on
+    assert not key(Qt.Key.Key_F9, QEvent.Type.KeyPress) and not win._ptt_on
+    win.ptt_key_check.setChecked(True)
+    win.ptt_key_edit.setKeySequence(QKeySequence(Qt.Key.Key_Left))                      # reserved: refused, key kept
+    assert win._ptt_key == Qt.Key.Key_F9.value
+
+
+def test_tx_meter_colours_follow_swr(env):
+    win, radio, pump = env
+    m = win.tx_meter
+
+    def swr_colour(v):
+        m.update_values(2.0, v, 3.0)
+        return m._bars["SWR"].property("chunk")
+
+    assert swr_colour(1.3) == m.COL_SWR_OK and swr_colour(2.0) == m.COL_SWR_OK
+    assert swr_colour(2.3) == m.COL_AMBER and swr_colour(2.49) == m.COL_AMBER
+    assert swr_colour(2.5) == m.COL_RED and swr_colour(3.5) == m.COL_RED
+    assert m._bars["PWR"].property("chunk") == m.COL_PWR and m._bars["ALC"].property("chunk") == m.COL_ALC
+
+
+def test_app_follows_the_radio_ending_a_transmission(env):
+    win, radio, pump = env
+    win.tx_enable.setChecked(True)
+    win.set_ptt(True)
+    pump(lambda: win.state.trx)
+    win._tx_since -= 5                                    # keyed a while ago
+    asyncio.run_coroutine_threadsafe(radio.broadcast("trx:0,false;"), win.w.loop).result(3)
+    pump(lambda: not win._ptt_on)
+    assert "radio ended" in win.statusBar().currentMessage()
+
+
+def test_mode_follows_band_and_segment(env):
+    win, radio, pump = env
+    from x6100_remote.panelinfo import PlanSegment
+    win.w.info.plan = [PlanSegment(7_000_000, 7_040_000, 0), PlanSegment(7_040_000, 7_060_000, 1),
+                       PlanSegment(7_060_000, 7_200_000, 2)]            # 40 m: CW, digital, phone
+    win._auto_mode(win.state.freq, apply=False)
+    assert win.state.mode == "lsb" and win.freq.freq == 7_151_000
+    win.tune_by(-131_000)                                           # 7.020 MHz: CW segment
+    pump(lambda: win.state.mode == "cw")
+    win.tune_by(30_000)                                             # 7.050 MHz: digital segment
+    pump(lambda: win.state.mode == "digu")
+    win.tune_by(-30_000)                                            # CW again, then a manual choice stays inside it
+    pump(lambda: win.state.mode == "cw")
+    win.w.send("modulation", 0, "usb")
+    pump(lambda: win.state.mode == "usb")
+    win.tune_by(1000)
+    pump(lambda: win.state.freq == 7_021_000)
+    time.sleep(0.3)
+    assert win.state.mode == "usb"                                  # same segment: not overridden
+    win.band_mem.update({"20": [14_200_000, "usb"], "80": [3_700_000, "lsb"]})     # not what earlier tests left
+    win.pick_band("20")                                             # 14.200 MHz: USB; 40 m phone is LSB
+    pump(lambda: win.state.mode == "usb" and win.state.freq == 14_200_000)
+    win.pick_band("80")
+    pump(lambda: win.state.mode == "lsb" and win.state.freq == 3_700_000)
+    win.auto_mode_check.setChecked(False)
+    win.w.send("modulation", 0, "usb")
+    pump(lambda: win.state.mode == "usb")
+    win.band_mem["40"] = [7_100_000, "lsb"]
+    win.pick_band("40")
+    pump(lambda: win.state.freq == 7_100_000 and win.state.mode == "lsb")   # remembered mode is used, auto mode off

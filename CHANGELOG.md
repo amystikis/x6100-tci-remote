@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.5
+
+- Transmit meter popup: while transmitting, power, SWR and ALC are shown in a popup over the bottom right of the spectrum, with a running transmit timer. The values come from the radio's `t` lines on the panel connection. SWR is light green up to 2.0, amber up to 2.5 and red above.
+- The radio sends no spectrum while it transmits: the spectrum and waterfall are now dimmed and labelled, and the waterfall keeps scrolling with empty rows.
+- The PTT section shows **Power** in watts (0.1 - 10 W) instead of the raw drive value, matching the radio's own display.
+- Hold-to-transmit key: Space (or a key you choose) keys the radio wherever the focus is in the active window, except in text and number fields. Settings > Keyboard turns it on or off and picks the key. A key-repeat release no longer drops the transmission, and the status bar says why a transmission ended (focus lost, the radio ended it, time limit).
+- The PTT button now releases when the radio is unkeyed by the key, the timer or a focus loss (it used to stay red).
+- Automatic mode: tuning into another band or segment sets LSB on 160/80/60/40 m, USB from 30 m up, DIGU in the band plan's digital segments and CW in its CW segments. Settings > Operating turns it off. 60 m now defaults to LSB.
+- The fake radio sends TX meter lines and no spectrum while transmitting, like the real radio.
+
 ## 0.3.4
 
 - `.deb`: the Qt/xcb system libraries (including `libxcb-cursor0`) are now hard dependencies instead of recommendations, so the app no longer fails to start with "Could not load the Qt platform plugin xcb" on a fresh install.

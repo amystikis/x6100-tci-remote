@@ -10,6 +10,7 @@ Observed on a real radio (firmware v0.3.9). One message per text frame, ``<kind>
            "vol":0,"pwr":2.5,"step":500,"zoom":4,"atu":0,"bat":-1,"tx":0,"lock":0, ...}
     ft8   {"open":0,"tx":0,"cq":0,"auto":0,"next":"","logged":"", ...}
     cw    "TTM "                                                  text decoded by the radio (JSON string)
+    t     2.4 1.02 7.7                                            TX meter, about 10 per second: power (W), SWR, ALC
 
 ``bands``, ``plan`` and ``state`` arrive on connect, ``spots`` about every 15 s. The meaning of the plan kinds
 (0 CW, 1 digital/narrow, 2 phone, 3 other) is inferred from the IARU segments of 160 m; the spot age ``a`` looks like
@@ -84,6 +85,9 @@ class PanelInfo:
     cw_text: str = ""
     volmax: int = 0
     pwrmax: int = 0
+    tx_power: float = 0.0         # forward power in W (``t`` line, field 1)
+    tx_swr: float = 1.0           # SWR (field 2)
+    tx_alc: float = 0.0           # ALC (field 3)
     role: str = "view"            # "view" until this app is paired; then "operate" or "admin"
     tx_allowed: bool = False      # the radio's per-device "may transmit" flag
     role_name: str = ""
@@ -116,6 +120,9 @@ class PanelInfo:
                 self.role_name = " ".join(parts[2:]).replace("-", "", 1) if len(parts) > 2 else ""
             elif kind == "ctl":
                 self.ctl_who = payload.split()[0] if payload.split() else ""
+            elif kind == "t":
+                p, swr, alc = (float(x) for x in payload.split()[:3])
+                self.tx_power, self.tx_swr, self.tx_alc = p, swr, alc
             elif kind == "volmax":
                 self.volmax = int(payload)
             elif kind == "pwrmax":

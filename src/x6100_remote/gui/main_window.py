@@ -7,12 +7,14 @@ import time
 from datetime import datetime, timezone
 
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QFont, QKeyEvent
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDockWidget, QFormLayout, QFrame, QGridLayout, QGroupBox,
-                               QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMessageBox, QPlainTextEdit,
-                               QPushButton, QSlider, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
+from PySide6.QtGui import QAction, QActionGroup, QFont, QKeyEvent, QKeySequence
+from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog, QDockWidget,
+                               QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel,
+                               QKeySequenceEdit, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
+                               QSlider, QSpinBox, QTabWidget, QVBoxLayout, QWidget)
 
 from .. import __version__
+from ..automode import desired_mode, needs_change
 from ..cwtuner import target_hz
 from ..ipc import CommandServer
 from .audio import AVAILABLE as AUDIO_OK, MicSource, RxAudio
@@ -22,13 +24,13 @@ from .settings import (load_band_memory, load_choice, load_flag, load_panel_toke
 from .spectrum_view import (DEFAULT_SPECTRUM, DEFAULT_SPOTS, DEFAULT_WATERFALL, SPECTRUM_SCHEMES, SPOT_SCHEMES,
                             WATERFALL_SCHEMES, ZOOM_LEVELS, SpectrumView)
 from .themes import DEFAULT_THEME, THEMES, build_style
-from .widgets import FrequencyDisplay, SMeter, apply_palette
+from .widgets import FrequencyDisplay, SMeter, TxMeterPopup, apply_palette
 from .worker import TciWorker
 
 # name, lo Hz, hi Hz, default Hz, default mode
 BANDS = [
     ("160", 1_800_000, 2_000_000, 1_840_000, "lsb"), ("80", 3_500_000, 4_000_000, 3_700_000, "lsb"),
-    ("60", 5_250_000, 5_450_000, 5_357_000, "usb"), ("40", 7_000_000, 7_300_000, 7_100_000, "lsb"),
+    ("60", 5_250_000, 5_450_000, 5_357_000, "lsb"), ("40", 7_000_000, 7_300_000, 7_100_000, "lsb"),
     ("30", 10_100_000, 10_150_000, 10_130_000, "usb"), ("20", 14_000_000, 14_350_000, 14_200_000, "usb"),
     ("17", 18_068_000, 18_168_000, 18_130_000, "usb"), ("15", 21_000_000, 21_450_000, 21_250_000, "usb"),
     ("12", 24_890_000, 24_990_000, 24_950_000, "usb"), ("10", 28_000_000, 29_700_000, 28_400_000, "usb"),
@@ -76,6 +78,7 @@ class MainWindow(QMainWindow):
 
         root = QWidget()
         self.setCentralWidget(root)
+        self.tx_meter = TxMeterPopup(root)
         v = QVBoxLayout(root)
         v.setContentsMargins(8, 6, 8, 6)
         v.setSpacing(4)
@@ -96,6 +99,15 @@ class MainWindow(QMainWindow):
         self.status = QLabel("Not connected")
         self.status.setTextFormat(Qt.TextFormat.RichText)
         self.statusBar().addPermanentWidget(self.status)
+        self._space_ptt = False              # the PTT key is held and keying
+        self._auto_mode_on = load_flag("auto_mode", True)
+        self._auto_key: tuple | None = None      # (band, wanted mode) of the last place we looked at
+        self._release_timer = QTimer(self)
+        self._release_timer.setSingleShot(True)
+        self._release_timer.setInterval(60)
+        self._release_timer.timeout.connect(self._ptt_key_released)
+        self._ptt_key_on = load_flag("ptt_key", True)
+        self._ptt_key = self._key_from_text(load_choice("ptt_key", "Space"))
         self._build_settings_dialog()
 
         # VFO + meter -----------------------------------------------------------
@@ -298,10 +310,14 @@ class MainWindow(QMainWindow):
         self.pc_mic = QCheckBox("Use this computer's microphone (experimental)")
         self.pc_mic.setEnabled(AUDIO_OK)
         tl.addWidget(self.pc_mic, 1, 2, 1, 2)
-        tl.addWidget(QLabel("Drive"), 2, 0)
+        tl.addWidget(QLabel("Power"), 2, 0)
         self.drive = QSlider(Qt.Orientation.Horizontal)
+        # The radio's drive value is 0-100 and maps linearly to 0.1-10 W (measured: drive 10 = 1.1 W on the radio's
+        # own display), so one step is about 0.1 W.
         self.drive.setRange(0, 100)
+        self.drive.setToolTip("Transmit power, 0.1 - 10 W in steps of about 0.1 W (TCI drive 0-100)")
         self.drive_lbl = QLabel("-")
+        self.drive_lbl.setMinimumWidth(52)
         # send while dragging, scrolling the wheel, using the keys or clicking the bar (not only on mouse release);
         # at most ~12 per second, and the final value is always sent
         self._drive_sent: int | None = None
@@ -392,6 +408,9 @@ class MainWindow(QMainWindow):
         h.addAction(about)
 
         # watchdog + wiring -------------------------------------------------------------
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)     # Space = push-to-talk wherever the focus is in this window
         self.tx_timer = QTimer(self)
         self.tx_timer.setInterval(250)
         self.tx_timer.timeout.connect(self._tx_watchdog)
@@ -428,6 +447,7 @@ class MainWindow(QMainWindow):
             hz = self._freq_target if self._freq_target is not None else st.freq
             self.freq.set_freq(hz)
             self._update_band(st.freq)
+            self._auto_mode(st.freq)
             if self._freq_target == st.freq:
                 self._freq_target = None
         if what in ("", "lock"):
@@ -469,9 +489,21 @@ class MainWindow(QMainWindow):
             self.drive.setValue(st.drive)
             self.drive.blockSignals(False)
             self._drive_sent = st.drive
-            self.drive_lbl.setText(str(st.drive))
+            self.drive_lbl.setText(self._power_text(st.drive))
         if what in ("", "trx"):
             self.tx_banner.setVisible(st.trx)
+            self.spectrum.set_transmitting(st.trx)
+            if st.trx and not self.tx_meter.isVisible():
+                self.tx_meter.begin()
+                self.tx_meter.reposition(self.spectrum)
+                self._tx_meter_update()
+            elif not st.trx:
+                self.tx_meter.end()
+                if self._ptt_on and time.monotonic() - self._tx_since > 1.0:
+                    self._space_ptt = False                  # the radio stopped transmitting on its own: show it
+                    self.set_ptt(False)
+                    self.statusBar().showMessage("The radio ended the transmission (release the key and press again)",
+                                                 8000)
         if what in ("", "device", "protocol", "ready"):
             self.info.setText(st.device)
             self.info.setToolTip("TCI protocol: %s" % st.protocol if st.protocol else "")
@@ -528,6 +560,26 @@ class MainWindow(QMainWindow):
         if band is not None and self.state.mode:
             self.band_mem[band[0]] = [hz, self.state.mode]
 
+    def _auto_mode(self, hz: int, apply: bool = True) -> None:
+        """Switch the mode when the frequency moves into another band or segment (see automode.py). Only on such a
+        change, so a mode picked by hand stays while tuning inside the same segment. Never while transmitting, and
+        the first look after connecting only records where we are."""
+        if not hz:
+            return
+        band = self._band_of(hz)
+        wanted = desired_mode(hz, band is not None, self.w.info.plan)
+        key = (band[0] if band else None, wanted)
+        first = self._auto_key is None
+        changed = key != self._auto_key
+        self._auto_key = key
+        if (not apply or first or not changed or not self._auto_mode_on or self.state.lock or self._ptt_on
+                or self.state.trx or not self.w.client):
+            return
+        if needs_change(self.state.mode, wanted):
+            self.statusBar().showMessage("Mode set to %s for this part of the band" % MODE_LABELS.get(wanted, wanted),
+                                         5000)
+            self.w.send("modulation", 0, wanted)
+
     def tune_by(self, delta: int) -> None:
         if self.state.lock or not self.w.client:
             return
@@ -546,8 +598,12 @@ class MainWindow(QMainWindow):
         base = self._freq_target if self._freq_target is not None else self.state.freq
         self.tune_by(hz - base)
 
+    @staticmethod
+    def _power_text(drive: int) -> str:
+        return "%.1f W" % (0.1 + 0.099 * drive)
+
     def _drive_changed(self, value: int) -> None:
-        self.drive_lbl.setText(str(value))
+        self.drive_lbl.setText(self._power_text(value))
         self._drive_local_at = time.monotonic()
         if self._drive_timer.isActive():
             self._drive_pending = True                    # sent when the timer fires
@@ -731,7 +787,90 @@ class MainWindow(QMainWindow):
         form.addRow(_btn("Reset", slot=lambda: (auto.setChecked(True), floor.setValue(0), contrast.setValue(100),
                                                 tr_auto.setChecked(True), tr_floor.setValue(0))))
         tabs.addTab(page, "Display")
+        tabs.addTab(self._build_operating_tab(), "Operating")
+        tabs.addTab(self._build_keyboard_tab(), "Keyboard")
         lay.addWidget(_btn("Close", slot=lambda: dlg.accept()), 0, Qt.AlignmentFlag.AlignRight)
+
+    # keys that already do something else in the app, so they cannot be the PTT key
+    RESERVED_KEYS = (Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Escape, Qt.Key.Key_F11, Qt.Key.Key_Tab,
+                     Qt.Key.Key_Backtab)
+
+    @classmethod
+    def _key_from_text(cls, text: str) -> int:
+        seq = QKeySequence(text)
+        k = seq[0].key().value if seq.count() else 0
+        return k if k and Qt.Key(k) not in cls.RESERVED_KEYS else Qt.Key.Key_Space.value
+
+    def _build_operating_tab(self) -> QWidget:
+        page = QWidget()
+        form = QFormLayout(page)
+        on = QCheckBox("Automatic mode by band and segment")
+        on.setChecked(self._auto_mode_on)
+
+        def toggled(v: bool) -> None:
+            self._auto_mode_on = v
+            save_flag("auto_mode", v)
+
+        on.toggled.connect(toggled)
+        form.addRow(on)
+        form.addRow(QLabel("When the frequency moves into another band or segment the mode follows:\n"
+                           "  - 160, 80, 60 and 40 m: LSB; 30 m and up: USB\n"
+                           "  - digital segments of the radio's band plan: DIGU\n"
+                           "  - CW segments: CW\n"
+                           "Not while transmitting or with the dial locked. AM/FM are never changed, and a mode you\n"
+                           "pick by hand stays while you tune inside the same segment."))
+        self.auto_mode_check = on
+        return page
+
+    def _build_keyboard_tab(self) -> QWidget:
+        page = QWidget()
+        form = QFormLayout(page)
+        on = QCheckBox("Hold a key to transmit (push-to-talk) while this window is active")
+        on.setChecked(self._ptt_key_on)
+        edit = QKeySequenceEdit(QKeySequence(Qt.Key(self._ptt_key)))
+        edit.setToolTip("Click, then press the key to use. Keys with Ctrl/Alt/Meta and keys that already do "
+                        "something else (arrows, Esc, F11, Tab) are not accepted.")
+        note = QLabel("")
+        note.setWordWrap(True)
+
+        def toggled(v: bool) -> None:
+            self._ptt_key_on = v
+            save_flag("ptt_key", v)
+            edit.setEnabled(v)
+            if not v and self._space_ptt:
+                self._release_timer.stop()
+                self._space_ptt = False
+                self.set_ptt(False)
+
+        def changed(seq: QKeySequence) -> None:
+            if seq.isEmpty():
+                return
+            first = seq[0]
+            k = first.key().value
+            if (first.keyboardModifiers() != Qt.KeyboardModifier.NoModifier or Qt.Key(k) in self.RESERVED_KEYS
+                    or Qt.Key(k) in (Qt.Key.Key_Control, Qt.Key.Key_Alt, Qt.Key.Key_Meta, Qt.Key.Key_Shift)):
+                note.setText("That key cannot be used. Pick one without Ctrl/Alt/Meta that is not an arrow, Esc, "
+                             "F11 or Tab.")
+                edit.setKeySequence(QKeySequence(Qt.Key(self._ptt_key)))
+                return
+            self._ptt_key = k
+            save_choice("ptt_key", QKeySequence(Qt.Key(k)).toString())
+            note.setText("PTT key: %s" % QKeySequence(Qt.Key(k)).toString())
+            edit.setKeySequence(QKeySequence(Qt.Key(k)))          # keep one key only
+
+        on.toggled.connect(toggled)
+        edit.keySequenceChanged.connect(changed)
+        edit.setEnabled(self._ptt_key_on)
+        reset = _btn("Reset to Space", slot=lambda: (edit.setKeySequence(QKeySequence(Qt.Key.Key_Space)),
+                                                     changed(QKeySequence(Qt.Key.Key_Space))))
+        form.addRow(on)
+        form.addRow("PTT key", edit)
+        form.addRow(reset)
+        form.addRow(note)
+        form.addRow(QLabel("Still needs 'Enable transmit' ticked. Ignored while typing in a text or number field,\n"
+                           "and the radio is unkeyed when the window loses focus."))
+        self.ptt_key_edit, self.ptt_key_check = edit, on
+        return page
 
     def open_settings(self) -> None:
         self.settings_dlg.exec()
@@ -778,7 +917,8 @@ class MainWindow(QMainWindow):
     def pick_band(self, name: str) -> None:
         band = next(b for b in BANDS if b[0] == name)
         hz, mode = self.band_mem.get(name, [band[3], band[4]])
-        self.w.send("modulation", 0, mode)
+        if not self._auto_mode_on:                  # with automatic mode the new frequency decides the mode
+            self.w.send("modulation", 0, mode)
         self.w.send("vfo", 0, 0, hz)
 
     # audio ------------------------------------------------------------------------------
@@ -824,7 +964,7 @@ class MainWindow(QMainWindow):
             self.tx_timer.stop()
             self.mic.stop()
             self.w.set_tx_source(None)
-        self.ptt.setDown(on) if not self.ptt.isDown() else None
+        self.ptt.setDown(on)                       # show the state also when keyed/unkeyed by key, timer or focus loss
         self._update_key_buttons()
 
     def _tx_watchdog(self) -> None:
@@ -850,25 +990,57 @@ class MainWindow(QMainWindow):
             self.tune_by((1 if k == Qt.Key.Key_Right else -1) * self.step.currentData() * mult)
         elif k == Qt.Key.Key_Escape and self.isFullScreen():
             self.toggle_fullscreen()
-        elif k == Qt.Key.Key_Space and not e.isAutoRepeat():
-            self.set_ptt(True)
         else:
             super().keyPressEvent(e)
 
-    def keyReleaseEvent(self, e: QKeyEvent) -> None:
-        if e.key() == Qt.Key.Key_Space and not e.isAutoRepeat():
-            self.set_ptt(False)
-        else:
-            super().keyReleaseEvent(e)
+    def eventFilter(self, obj, e) -> bool:
+        """Hold the PTT key (Space by default, set in Settings > Keyboard) to transmit while this window is the active
+        one. It is taken before the focused widget sees it (a checkbox or button would otherwise be toggled), except
+        while typing in a text or number field."""
+        t = e.type()
+        if t not in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease) or e.key() != self._ptt_key:
+            return False
+        if t == QEvent.Type.KeyRelease and self._space_ptt:            # always honour the release of a held key
+            if not e.isAutoRepeat():
+                self._release_timer.start()      # not at once: some systems send release+press when the key repeats
+            return True
+        mods = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.MetaModifier
+        if not self._ptt_key_on or e.modifiers() & mods:
+            return False
+        if QApplication.activeWindow() is not self:                    # another window or a dialog is in front
+            return False
+        focus = QApplication.focusWidget()
+        if isinstance(focus, (QLineEdit, QAbstractSpinBox, QPlainTextEdit)) or (
+                isinstance(focus, QComboBox) and focus.isEditable()):
+            return False                                               # let the user type a space
+        if t == QEvent.Type.KeyPress:
+            if self._release_timer.isActive():
+                self._release_timer.stop()                             # a repeat, not a real release: stay keyed
+            elif not e.isAutoRepeat() and not self._space_ptt:
+                self._space_ptt = True
+                self.set_ptt(True)
+                if not self._ptt_on:
+                    self._space_ptt = False                            # refused (transmit not enabled / no radio)
+            return True
+        return True
+
+    def _ptt_key_released(self) -> None:
+        self._space_ptt = False
+        self.set_ptt(False)
 
     def changeEvent(self, e) -> None:
         if (e.type() == QEvent.Type.ActivationChange and not self.isActiveWindow() and self._ptt_on
                 and not self._ptt_external):
+            self._space_ptt = False
             self.set_ptt(False)                    # never stay keyed after losing focus (button/Space PTT)
+            self.statusBar().showMessage("Unkeyed: the window lost focus", 8000)
         super().changeEvent(e)
 
     def closeEvent(self, e) -> None:
         self.set_ptt(False)
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
         if self.cmd_server is not None:
             self.cmd_server.stop()
         if self.isFullScreen():
@@ -920,6 +1092,7 @@ class MainWindow(QMainWindow):
         self.connect_btn.setText("Disconnect")
         self._panel_url = panel_url or panel_url_for(url)
         self.w.set_panel_token(load_panel_token(self._panel_url))
+        self._auto_key = None
         self.w.connect_to(url)
         if self.spectrum_act.isChecked():
             self.spectrum.clear()
@@ -947,6 +1120,7 @@ class MainWindow(QMainWindow):
         info = self.w.info
         if kind == "plan":
             self.spectrum.set_plan(info.plan)
+            self._auto_mode(self.state.freq, apply=False)       # the plan refines the rule; only note where we are
         elif kind == "spots":
             self.spectrum.set_spots(info.spots)
         elif kind in ("state", "ft8", "role"):
@@ -955,10 +1129,22 @@ class MainWindow(QMainWindow):
             st = self.state
             if kind == "state" and st.mode in ("cw", "cwr"):
                 self._apply_cw_tuner(st.mode, abs(st.filter_hi - st.filter_lo))     # the pitch may have changed
+        elif kind == "t":
+            if self.tx_meter.isVisible():
+                self._tx_meter_update()
         elif kind == "cw":
             self.cw_view.setPlainText(info.cw_text)
             self.cw_view.verticalScrollBar().setValue(self.cw_view.verticalScrollBar().maximum())
             self._update_cw_visibility()
+
+    def _tx_meter_update(self) -> None:
+        i = self.w.info
+        self.tx_meter.update_values(i.tx_power, i.tx_swr, i.tx_alc)
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        if self.tx_meter.isVisible():
+            self.tx_meter.reposition(self.spectrum)
 
     # OS hotkey support (x6100-tci-remote --ptt on|off|toggle) -----------------------------------------------
     def start_command_server(self, name: str | None = None) -> bool:

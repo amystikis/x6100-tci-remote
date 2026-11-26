@@ -1,9 +1,11 @@
 """Custom-painted widgets: frequency display and S-meter."""
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt, Signal
+import time
+
+from PySide6.QtCore import QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPen
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QProgressBar, QWidget
 
 from ..tci.protocol import dbm_to_s
 
@@ -223,3 +225,117 @@ class SMeter(QWidget):
         p.setPen(DIM)
         p.drawText(QRectF(w - 66, 2, 60, h - 4), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
                    "%d dBm" % round(self.dbm))
+
+
+class TxMeterPopup(QFrame):
+    """Small overlay with power, SWR and ALC, shown over the main window while transmitting.
+
+    It is a child widget (not a separate window) so it can never take focus.
+    (The app unkeys when its window loses focus.)"""
+
+    POWER_SCALES = (5, 10, 25, 50, 100)
+    SWR_MAX = 3.0                      # bar full scale; the number is shown as is
+    SWR_WARN = 2.0                     # above this the SWR bar is amber, from SWR_RED up it is red
+    SWR_RED = 2.5
+    COL_PWR, COL_SWR_OK, COL_ALC = "#9aa5b8", "#7ee2a8", "#7cc4ff"     # grey, light green, light blue
+    COL_AMBER, COL_RED = "#f0a830", "#ff5a5a"
+    ALC_MAX = 10.0                     # observed 0-8 on a real radio; the unit is not documented
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setObjectName("tx_meter")
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setStyleSheet(
+            "QFrame#tx_meter { background:rgba(10,17,32,235); border:2px solid #d42f2f; border-radius:8px; }"
+            "QLabel { color:#dbe4f3; background:transparent; font-weight:600; font-size:17px; }"
+            "QProgressBar { border:1px solid #22324f; border-radius:4px; background:#0a1120; height:18px; }"
+            "QProgressBar::chunk { background:#3ddc97; }")
+        g = QGridLayout(self)
+        g.setContentsMargins(16, 12, 16, 12)
+        g.setHorizontalSpacing(12)
+        g.setVerticalSpacing(8)
+        title = QLabel("● TRANSMITTING")
+        title.setStyleSheet("color:#ff5a5a; font-weight:700; font-size:19px; background:transparent;")
+        g.addWidget(title, 0, 0, 1, 2)
+        self._clock = QLabel("00:00.0")
+        self._clock.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._clock.setStyleSheet("color:#dbe4f3; font-weight:700; font-size:19px; background:transparent;")
+        g.addWidget(self._clock, 0, 2)
+        self._t0 = 0.0
+        self._tick = QTimer(self)
+        self._tick.setInterval(100)
+        self._tick.timeout.connect(self._show_elapsed)
+        self._bars: dict[str, QProgressBar] = {}
+        self._vals: dict[str, QLabel] = {}
+        for row, name in enumerate(("PWR", "SWR", "ALC"), start=1):
+            bar = QProgressBar()
+            bar.setRange(0, 1000)
+            bar.setTextVisible(False)
+            bar.setMinimumWidth(240)
+            val = QLabel("-")
+            val.setMinimumWidth(90)
+            val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            g.addWidget(QLabel(name), row, 0)
+            g.addWidget(bar, row, 1)
+            g.addWidget(val, row, 2)
+            self._bars[name], self._vals[name] = bar, val
+        self._scale = self.POWER_SCALES[0]
+        self.hide()
+
+    def _color(self, name: str, color: str) -> None:
+        bar = self._bars[name]
+        if bar.property("chunk") != color:
+            bar.setProperty("chunk", color)
+            bar.setStyleSheet("QProgressBar::chunk { background:%s; border-radius:3px; }" % color)
+
+    def _show_elapsed(self) -> None:
+        t = max(0.0, time.monotonic() - self._t0)
+        self._clock.setText("%02d:%04.1f" % (t // 60, t % 60))
+
+    def begin(self) -> None:
+        self._t0 = time.monotonic()
+        self._show_elapsed()
+        self._tick.start()
+        self._scale = self.POWER_SCALES[0]
+        self.update_values(0.0, 1.0, 0.0)
+        self.show()
+        self.raise_()
+        self.reposition()
+
+    def end(self) -> None:
+        self._tick.stop()
+        self.hide()
+
+    def reposition(self, anchor: QWidget | None = None) -> None:
+        """Bottom right corner of ``anchor`` (the spectrum area) or, without one, of the parent."""
+        p = self.parentWidget()
+        if p is None:
+            return
+        self.adjustSize()
+        a = anchor if anchor is not None and anchor.isVisible() else None
+        if a is not None:
+            r = a.rect().translated(a.mapTo(p, a.rect().topLeft()))
+        else:
+            r = p.rect()
+        self.move(max(0, r.right() - self.width() - 14), max(0, r.bottom() - self.height() - 14))
+
+    def update_values(self, power: float, swr: float, alc: float) -> None:
+        while power > self._scale * 0.9 and self._scale < self.POWER_SCALES[-1]:
+            self._scale = next(s for s in self.POWER_SCALES if s > self._scale)       # grow only, so it does not jump
+        self._bars["PWR"].setValue(int(min(1.0, power / self._scale) * 1000))
+        self._vals["PWR"].setText("%.1f W" % power)
+        self._bars["SWR"].setValue(int(min(1.0, max(0.0, swr - 1.0) / (self.SWR_MAX - 1.0)) * 1000))
+        self._vals["SWR"].setText("%.2f" % swr)
+        self._bars["ALC"].setValue(int(min(1.0, alc / self.ALC_MAX) * 1000))
+        self._vals["ALC"].setText("%.1f" % alc)
+        if swr >= self.SWR_RED:
+            swr_col = self.COL_RED
+        elif swr > self.SWR_WARN:
+            swr_col = self.COL_AMBER
+        else:
+            swr_col = self.COL_SWR_OK
+        self._color("PWR", self.COL_PWR)
+        self._color("SWR", swr_col)
+        self._color("ALC", self.COL_ALC)
+        self._vals["SWR"].setStyleSheet("color:%s; font-weight:700; font-size:17px; background:transparent;" % swr_col)
