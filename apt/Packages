@@ -1,0 +1,24 @@
+Package: x6100-tci-remote
+Version: 0.3.6
+Architecture: all
+Maintainer: Apostolis Mystikis (M7SVA) <164936959+amystikis@users.noreply.github.com>
+Depends: python3 (>= 3.10), python3-venv, python3-pip, ca-certificates, libegl1, libgl1, libglib2.0-0, libfontconfig1, libdbus-1-3, libx11-xcb1, libxkbcommon0, libxkbcommon-x11-0, libxcb-cursor0, libxcb-glx0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render0, libxcb-render-util0, libxcb-shape0, libxcb-shm0, libxcb-sync1, libxcb-xfixes0, libxcb-xinerama0, libxcb-xkb1, libpulse0
+Filename: ./x6100-tci-remote_0.3.6_all.deb
+Size: 71404
+MD5sum: 194b0fda9a278641b173a67387d4a7ac
+SHA1: 643ed9f5feeeea955b85a8fcf63f0e493447a2db
+SHA256: 97817d36a4a1807057fef76ddad89b357b856aa702c368da1f15da936b36a79a
+Section: hamradio
+Priority: optional
+Homepage: https://github.com/amystikis/x6100-tci-remote
+Description: Remote controller for the Xiegu X6100 and X6200 (OpenX6X00 firmware) over TCI
+ A desktop app for the Xiegu X6100 and X6200 running the OpenX6X00 firmware
+ (https://openx6x00.org/). It works only with that firmware. It talks to the
+ radio's TCI WebSocket server to tune, change mode and filter, listen to the receiver
+ audio and (optionally, guarded) transmit, and to the radio's panel server for the
+ spectrum and waterfall, band plan, DX spots, status, CW decoder text, a CW tuner
+ indicator, the radio's key buttons (after pairing) and an OS-hotkey PTT command.
+ .
+ Credits to RF.Guru (Joeri Van Dooren ON6URE) and everyone contributing to the
+ open-source OpenX6X00 firmware. Licensed under LGPL-2.1-or-later.
+

@@ -1,0 +1,24 @@
+Architectures: all
+Codename: stable
+Components: main
+Date: Fri, 27 Nov 2026 16:01:03 +0000
+Description: x6100-tci-remote apt repository
+Label: x6100-tci-remote
+Origin: x6100-tci-remote
+Suite: stable
+MD5Sum:
+ c917a160e1ddc3db567afd118a79bd4c             1588 Packages
+ 648d3216e85bd324e74208dff9c4f3d5              926 Packages.gz
+ 37e2522543ca096939390cea688a3690              199 Release
+SHA1:
+ a49e3d702ae7d236bc61180508df61c092ee8da1             1588 Packages
+ b01eaed9e09f760bfe4ef4d26a0285b02698fe21              926 Packages.gz
+ 3e400c0c59372f5e957c22f55e9149d1c73b52c7              199 Release
+SHA256:
+ 2d1dd16b4cda1cfd5bf048df29beb6ea0a0abadc431ae061638ef1194a4c7a36             1588 Packages
+ 203e98f1e337a16e560ec16bb0fb5613f2d9d22422bce81fee34a8c4c71cad98              926 Packages.gz
+ 47ea6c1286a5208a1bc5adaeebdca8f5c37c49b8c22011f6161955d1affddbef              199 Release
+SHA512:
+ 75a8637c20bcc24f9b81f941a11db68d2f1b9d12294a756f3573304414166c1d44bd687b80c2ce7390d11d98ae64296bf0fb7b7c4edea9696b3f1a4bda4288fa             1588 Packages
+ 5a3cde122b38617a910f7cbf429e6c2f005f3a1f95fc909baeb3c60474c56ff8c671e342dc0cc1729ec77159932c0a328ca3161cb4ac10a2bb9ffe3031bb7c28              926 Packages.gz
+ 847999f58190d083f7d84da3204989e4b0af7607d92f1f2632ad0d1379749bca0b560abe0de3d384cc0ba3b1ed40d164e4f88d25d0e844c4e6800a0df2d5e016              199 Release
