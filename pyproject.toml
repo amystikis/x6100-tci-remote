@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "x6100-tci-remote"
-version = "0.3.5"
+version = "0.3.6"
 description = "Independent desktop remote controller for the Xiegu X6100 and X6200 (OpenX6X00) over TCI"
 readme = "README.md"
 requires-python = ">=3.10"

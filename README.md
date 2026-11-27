@@ -71,6 +71,23 @@ Each [GitHub release](https://github.com/amystikis/x6100-tci-remote/releases) ca
 creates `/opt/x6100-tci-remote/venv` and installs PySide6, websockets and numpy from PyPI into it (internet needed once;
 Debian/Ubuntu do not ship PySide6 under a stable package name, and their `websockets` is older than the version needed).
 If that step could not reach the internet, run the `pip install` line it prints. Removing the package deletes the venv.
+
+#### Updating with `apt` instead of downloading each release
+
+A small apt repository is published on the `gh-pages` branch via GitHub Pages and rebuilt (and re-signed) by
+`.github/workflows/release.yml` every time a new version is released, so once it's added as a source, `sudo apt
+update && sudo apt upgrade` picks up new versions the normal way. One-time setup per machine:
+
+```bash
+curl -fsSL https://amystikis.github.io/x6100-tci-remote/apt/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/x6100-tci-remote.gpg
+echo "deb [signed-by=/usr/share/keyrings/x6100-tci-remote.gpg] https://amystikis.github.io/x6100-tci-remote/apt ./" | sudo tee /etc/apt/sources.list.d/x6100-tci-remote.list
+sudo apt update
+sudo apt install x6100-tci-remote
+```
+
+After that, `sudo apt update && sudo apt upgrade` alone keeps it current. The repository only ever carries the
+latest version (there's a single package, so there is nothing to pin to); the project's GPG key signs the
+`Release` file (`InRelease`/`Release.gpg`), which is what `apt update` checks.
 Start the app from the application menu or run `x6100-tci-remote`.
 
 ## Run

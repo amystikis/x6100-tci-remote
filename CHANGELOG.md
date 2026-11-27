@@ -1,12 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.3.6
 
 - Audio recorder: **Rec** saves the radio's receive audio to a WAV file (48 kHz, 16 bit, stereo) named with the UTC time, frequency and mode; works with Sound off; stops after an hour, on disconnect or on a disk error. The folder is set in Settings > Operating.
 - Playback-transmit: **File... / Transmit file** sends a WAV file (PCM or float, any rate) over the air with a level slider, a confirmation, the transmit-enable and auto-unkey guards, a Stop button, and unkeys itself when the file ends.
 - New module `audiofile.py` (WAV reading/writing, resampling, file player) with its own Qt-free tests.
 - The "TX - the radio sends no spectrum while transmitting" label on the dimmed spectrum was drawn in a 1-point font and could not be read; it now has a fixed size and sits at the top left, clear of the TX meter popup.
 - README: new Transmit section and a screenshot of the TX meter popup.
+- `.deb` installs can now be kept current with `apt`: a signed apt repository is published on the `gh-pages` branch and rebuilt on every release, instead of only attaching the `.deb` to the GitHub release. See the README's "Updating with apt" section.
 
 ## 0.3.5
 

@@ -36,6 +36,34 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: { name: deb, path: "build/*.deb" }
 
+  apt-repo:
+    needs: [check, deb]
+    if: needs.check.outputs.needed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { ref: gh-pages, path: gh-pages }
+      - uses: actions/download-artifact@v4
+        with: { name: deb, path: build }
+      - name: Import the apt repo signing key
+        run: |
+          mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
+          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+          gpgconf --kill gpg-agent || true
+          echo "${{ secrets.APT_SIGNING_KEY }}" | gpg --batch --pinentry-mode loopback --passphrase '' --import
+      - name: Rebuild and sign the apt repository
+        run: packaging/publish_apt_repo.sh gh-pages/apt "$(ls build/*.deb)"
+      - name: Publish the apt repository
+        run: |
+          cd gh-pages
+          git add apt
+          if ! git diff --cached --quiet; then
+            git -c user.name="x6100-tci-remote release bot" -c user.email="164936959+amystikis@users.noreply.github.com" \
+              commit -m "apt repo: v${{ needs.check.outputs.version }}"
+            git push origin gh-pages
+          fi
+
   windows:
     needs: check
     if: needs.check.outputs.needed == 'true'
